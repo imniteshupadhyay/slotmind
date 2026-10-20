@@ -58,10 +58,26 @@ public class ReschedulingService {
         return propose(appointmentId, trigger, text -> {});
     }
 
+    /** Agent path: reuses only a pending suggestion with the same trigger. */
     public Optional<Proposal> propose(String appointmentId, TriggerReason trigger, Consumer<String> progress) {
-        Optional<RescheduleSuggestion> existing = existingPending(appointmentId, trigger);
+        return propose(appointmentId, trigger, progress, false);
+    }
+
+    /** Manual Suggest (staff click): reuses ANY pending suggestion for the appointment, whatever its trigger. */
+    public Optional<Proposal> suggestManually(String appointmentId) {
+        return suggestManually(appointmentId, text -> {});
+    }
+
+    public Optional<Proposal> suggestManually(String appointmentId, Consumer<String> progress) {
+        return propose(appointmentId, TriggerReason.INITIAL, progress, true);
+    }
+
+    private Optional<Proposal> propose(String appointmentId, TriggerReason trigger, Consumer<String> progress,
+                                       boolean reuseAnyTrigger) {
+        Optional<RescheduleSuggestion> existing = existingPending(appointmentId, trigger, reuseAnyTrigger);
         if (existing.isPresent()) {
-            activity.info("Skipped " + appointmentId + ": a pending " + trigger + " suggestion already exists");
+            activity.info("Skipped " + appointmentId + ": a pending " + existing.get().getTriggerReason()
+                    + " suggestion already exists");
             return existing.map(s -> new Proposal(s, false));
         }
 
@@ -73,7 +89,7 @@ public class ReschedulingService {
             return Optional.empty();
         }
 
-        Proposal proposal = tx.execute(status -> save(appointmentId, trigger, outcome.get()));
+        Proposal proposal = tx.execute(status -> save(appointmentId, trigger, reuseAnyTrigger, outcome.get()));
         if (proposal.created()) {
             Slot slot = ctx.candidate(proposal.suggestion().getRecommendedSlotId());
             activity.success("Suggested " + ctx.providerOf(slot).getName() + " " + Phrases.when(slot.getStartTime(), ctx.now())
@@ -82,9 +98,10 @@ public class ReschedulingService {
         return Optional.of(proposal);
     }
 
-    private Optional<RescheduleSuggestion> existingPending(String appointmentId, TriggerReason trigger) {
+    private Optional<RescheduleSuggestion> existingPending(String appointmentId, TriggerReason trigger,
+                                                           boolean anyTrigger) {
         return suggestions.findByAppointmentIdAndStatus(appointmentId, SuggestionStatus.PENDING).stream()
-                .filter(s -> s.getTriggerReason() == trigger)
+                .filter(s -> anyTrigger || s.getTriggerReason() == trigger)
                 .findFirst();
     }
 
@@ -125,8 +142,9 @@ public class ReschedulingService {
         return new SchedulingContext(appt, original, originalSlot, trigger, candidates, roster, now);
     }
 
-    private Proposal save(String appointmentId, TriggerReason trigger, SchedulingEngine.Outcome outcome) {
-        Optional<RescheduleSuggestion> raced = existingPending(appointmentId, trigger);
+    private Proposal save(String appointmentId, TriggerReason trigger, boolean reuseAnyTrigger,
+                          SchedulingEngine.Outcome outcome) {
+        Optional<RescheduleSuggestion> raced = existingPending(appointmentId, trigger, reuseAnyTrigger);
         if (raced.isPresent()) return new Proposal(raced.get(), false);
 
         Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));

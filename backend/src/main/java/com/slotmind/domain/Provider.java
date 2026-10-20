@@ -12,6 +12,13 @@ public class Provider {
     private Specialty specialty;
     @Enumerated(EnumType.STRING)
     private ProviderStatus status;
+    /**
+     * Optimistic lock: an accept checks this at commit, so a provider going offline mid-accept fails the accept.
+     * The default lets ddl-auto add the column to an existing database without leaving NULL versions behind.
+     */
+    @Version
+    @Column(columnDefinition = "bigint default 0")
+    private Long version;
 
     protected Provider() {}
 

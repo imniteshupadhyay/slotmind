@@ -106,8 +106,10 @@ public class BookingService {
 
     /**
      * Accept = one transaction that updates the suggestion, the appointment, the old slot and the new slot.
-     * Double booking is prevented twice over: {@link Slot#book()} refuses a non-OPEN slot, and the slot's
-     * {@code @Version} makes a concurrent accept of the same slot fail at commit (-> HTTP 409).
+     * With one pooled connection, SQLite runs accepts one after the other, so the loser of a race is stopped by
+     * the state checks: {@link Slot#book()} refuses a non-OPEN slot and a superseded suggestion cannot be accepted.
+     * {@code @Version} is the backstop if the pool ever grows: a concurrent write to the slot, or to the provider
+     * (read with an optimistic lock, so going offline mid-accept counts), fails this commit (-> HTTP 409).
      */
     @Transactional
     public RescheduleSuggestion accept(String suggestionId) {
@@ -115,7 +117,8 @@ public class BookingService {
         Appointment appt = appointments.findById(suggestion.getAppointmentId())
                 .orElseThrow(() -> new NotFoundException("Appointment", suggestion.getAppointmentId()));
         Slot newSlot = slot(suggestion.getRecommendedSlotId());
-        Provider newProvider = provider(newSlot.getProviderId());
+        Provider newProvider = providers.findForBookingById(newSlot.getProviderId())
+                .orElseThrow(() -> new NotFoundException("Provider", newSlot.getProviderId()));
         if (!newProvider.isBookable()) {
             throw new DomainException(newProvider.getName() + " went offline after this suggestion was made");
         }

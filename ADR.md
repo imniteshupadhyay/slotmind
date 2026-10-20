@@ -30,8 +30,9 @@ lifecycle) must hold no matter which caller — HTTP, the async agent, or a futu
 - `BookingService` (commands) and `ReschedulingService` (proposals) orchestrate; the **scheduling
   decision itself** lives behind the `SchedulingStrategy` contract (ADR-2), not in services or entities.
 
-Booking conflicts are prevented at the domain boundary by `Slot.book()` and, under concurrency, by
-`@Version` optimistic locking (ADR-3). Any violation throws `DomainException` → HTTP 409.
+Booking conflicts are prevented at the domain boundary by `Slot.book()`. With SQLite's single writer,
+racing accepts run in turn, so this check also stops the loser. `@Version` optimistic locking is the
+backstop if the pool ever grows (ADR-3). A `DomainException` or a version conflict → HTTP 409.
 
 **Tradeoffs.** Entities reference each other by id (not JPA relations). That keeps snapshots cheap
 to pass to strategies and avoids lazy-loading surprises, at the cost of a few explicit lookups.
@@ -93,11 +94,22 @@ on `appointments.slot_id`.
    *other* appointments that pointed at the same slot are rejected, and an event asks the agent to
    re-propose for those patients.
 
-Concurrency is handled by **optimistic locking**: `Slot`, `Appointment` and `RescheduleSuggestion` carry
-`@Version`. If two accepts race for one slot, the second commit fails its
-`UPDATE … WHERE version = ?` → `ObjectOptimisticLockingFailureException` → HTTP 409 with a friendly
-message. SQLite additionally serialises writers (one pooled connection + `busy_timeout`).
-`AcceptConcurrencyTest` fires two accepts at the same slot in parallel and asserts exactly one wins.
+Concurrency is handled in two layers:
+- **Today: serialisation + state checks.** SQLite's single writer (one pooled connection +
+  `busy_timeout`) runs racing accepts one after the other. The second one sees the first one's commit,
+  so the state checks reject it: `Slot.book()` refuses the now-`BOOKED` slot, or its suggestion was
+  already superseded. Either throws `DomainException` → HTTP 409.
+- **Backstop: optimistic locking**, for when the pool ever grows. `Slot`, `Appointment`,
+  `RescheduleSuggestion` and `Provider` carry `@Version`. Accept reads the provider with
+  `LockModeType.OPTIMISTIC`, so its version is re-checked at commit even though accept never writes it.
+  A concurrent write to a row the accept used fails the commit (`UPDATE … WHERE version = ?`, or the
+  provider's version re-check) → `OptimisticLockingFailureException` → HTTP 409 with a friendly message.
+
+`AcceptConcurrencyTest` covers both layers. It fires two accepts at the same slot in parallel and asserts
+exactly one wins, which proves the first layer. With one connection the transactions can't interleave,
+so two stale-entity tests prove the backstop: a JDBC write on the same connection bumps the row's
+version after the entity is loaded. A stale `Slot` write is rejected, and so is an accept whose provider
+goes offline before it commits.
 
 **Tradeoffs.** Optimistic locking needs no locks held across user think-time and suits low contention.
 The loser gets a 409 and retries, which is acceptable at a front desk. A unique index on `slot_id` was

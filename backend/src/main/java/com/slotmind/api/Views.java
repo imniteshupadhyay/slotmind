@@ -18,6 +18,12 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class Views {
 
+    public record ProviderView(String id, String name, Specialty specialty, ProviderStatus status, boolean bookable) {
+        static ProviderView of(Provider p) {
+            return new ProviderView(p.getId(), p.getName(), p.getSpecialty(), p.getStatus(), p.isBookable());
+        }
+    }
+
     public record SlotView(String id, String providerId, String providerName, LocalDateTime startTime,
                            int durationMinutes, SlotStatus status, String appointmentId, String patientName) {}
 
@@ -55,26 +61,43 @@ public class Views {
                 appointments.findAll().stream().collect(Collectors.toMap(Appointment::getId, Function.identity())));
     }
 
-    public List<Provider> providers() {
-        return providers.findAll(org.springframework.data.domain.Sort.by("id"));
+    public List<ProviderView> providers() {
+        return providers.findAll(org.springframework.data.domain.Sort.by("id")).stream().map(ProviderView::of).toList();
+    }
+
+    public ProviderView provider(String id) {
+        return ProviderView.of(providers.findById(id).orElseThrow(() -> new NotFoundException("Provider", id)));
     }
 
     public List<SlotView> slots(String providerId, SlotStatus status) {
         Lookup l = lookup();
+        Map<String, Appointment> bySlot = activeBySlot(l);
+        return slots.findAllByOrderByStartTimeAsc().stream()
+                .filter(s -> providerId == null || s.getProviderId().equals(providerId))
+                .filter(s -> status == null || s.getStatus() == status)
+                .map(s -> slot(s, l, bySlot))
+                .toList();
+    }
+
+    public SlotView slot(String id) {
+        Lookup l = lookup();
+        Slot s = Optional.ofNullable(l.slots().get(id)).orElseThrow(() -> new NotFoundException("Slot", id));
+        return slot(s, l, activeBySlot(l));
+    }
+
+    private static Map<String, Appointment> activeBySlot(Lookup l) {
         Map<String, Appointment> bySlot = new HashMap<>();
         l.appointments().values().stream()
                 .filter(a -> a.getStatus() != AppointmentStatus.COMPLETED)
                 .forEach(a -> bySlot.put(a.getSlotId(), a));
-        return slots.findAllByOrderByStartTimeAsc().stream()
-                .filter(s -> providerId == null || s.getProviderId().equals(providerId))
-                .filter(s -> status == null || s.getStatus() == status)
-                .map(s -> {
-                    Appointment a = bySlot.get(s.getId());
-                    Provider p = l.providers().get(s.getProviderId());
-                    return new SlotView(s.getId(), s.getProviderId(), p == null ? null : p.getName(), s.getStartTime(),
-                            s.getDurationMinutes(), s.getStatus(), a == null ? null : a.getId(), a == null ? null : a.getPatientName());
-                })
-                .toList();
+        return bySlot;
+    }
+
+    private static SlotView slot(Slot s, Lookup l, Map<String, Appointment> bySlot) {
+        Appointment a = bySlot.get(s.getId());
+        Provider p = l.providers().get(s.getProviderId());
+        return new SlotView(s.getId(), s.getProviderId(), p == null ? null : p.getName(), s.getStartTime(),
+                s.getDurationMinutes(), s.getStatus(), a == null ? null : a.getId(), a == null ? null : a.getPatientName());
     }
 
     public List<AppointmentView> appointments(AppointmentStatus status) {

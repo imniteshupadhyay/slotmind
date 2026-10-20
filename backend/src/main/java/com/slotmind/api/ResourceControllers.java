@@ -32,15 +32,16 @@ public final class ResourceControllers {
         }
 
         @GetMapping
-        public List<com.slotmind.domain.Provider> list() {
+        public List<Views.ProviderView> list() {
             return views.providers();
         }
 
         /** OFFLINE triggers the agentic loop; returns immediately (202). */
         @PatchMapping("/{id}/status")
         @ResponseStatus(HttpStatus.ACCEPTED)
-        public com.slotmind.domain.Provider changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
-            return booking.changeProviderStatus(id, req.status());
+        public Views.ProviderView changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
+            booking.changeProviderStatus(id, req.status());
+            return views.provider(id);
         }
     }
 
@@ -68,15 +69,16 @@ public final class ResourceControllers {
 
         @PostMapping
         @ResponseStatus(HttpStatus.CREATED)
-        public com.slotmind.domain.Slot create(@Valid @RequestBody CreateRequest req) {
-            return booking.createSlot(req.providerId(), req.startTime(), req.durationMinutes());
+        public Views.SlotView create(@Valid @RequestBody CreateRequest req) {
+            return views.slot(booking.createSlot(req.providerId(), req.startTime(), req.durationMinutes()).getId());
         }
 
         /** CANCELLED triggers the agentic loop; returns immediately (202). */
         @PatchMapping("/{id}/status")
         @ResponseStatus(HttpStatus.ACCEPTED)
-        public com.slotmind.domain.Slot changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
-            return booking.changeSlotStatus(id, req.status());
+        public Views.SlotView changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
+            booking.changeSlotStatus(id, req.status());
+            return views.slot(id);
         }
     }
 

@@ -104,15 +104,19 @@ Concurrency is handled in two layers:
   already superseded. Either throws `DomainException` → HTTP 409.
 - **Backstop: optimistic locking**, for when the pool ever grows. `Slot`, `Appointment`,
   `RescheduleSuggestion` and `Provider` carry `@Version`. Accept reads the provider with
-  `LockModeType.OPTIMISTIC`, so its version is re-checked at commit even though accept never writes it.
-  A concurrent write to a row the accept used fails the commit (`UPDATE … WHERE version = ?`, or the
-  provider's version re-check) → `OptimisticLockingFailureException` → HTTP 409 with a friendly message.
+  `LockModeType.OPTIMISTIC_FORCE_INCREMENT`, so its commit writes the provider's version even though accept
+  never changes the provider. A plain `OPTIMISTIC` re-check would leave a window between the check and the
+  commit; the forced write closes it, so an accept and a provider status change committing concurrently
+  conflict and one of them fails. A write to a row the accept used that lands first fails the accept's
+  commit (`UPDATE … WHERE version = ?`) → `OptimisticLockingFailureException` → HTTP 409 with a friendly message.
 
 `AcceptConcurrencyTest` covers both layers. It fires two accepts at the same slot in parallel and asserts
-exactly one wins, which proves the first layer. With one connection the transactions can't interleave,
-so two stale-entity tests prove the backstop: a JDBC write on the same connection bumps the row's
-version after the entity is loaded. A stale `Slot` write is rejected, and so is an accept whose provider
-goes offline before it commits.
+exactly one wins, which proves the first layer. With one pooled connection, transactions can't interleave,
+so a true cross-transaction race can't happen and can't be staged. The backstop tests prove only the
+mechanism, that the version check fires on a stale row: a JDBC write on the same connection bumps a row's
+version after the entity was loaded, inside the same transaction. A stale `Slot` write is rejected, and so
+is an accept whose provider row went stale before commit. A third test shows that accept bumps the
+provider's version, so a provider copy read before the accept can no longer be written.
 
 **Tradeoffs.** Optimistic locking needs no locks held across user think-time and suits low contention.
 The loser gets a 409 and retries, which is acceptable at a front desk. A unique index on `slot_id` was
@@ -138,9 +142,11 @@ transactional listeners · a message broker.
   `CONFIRMED`, `RESCHEDULED` and `RESCHEDULE_PENDING` bookings that have no pending suggestion left. The status
   change also rejects every pending suggestion whose slot it made unbookable, and those patients join the same
   triaged batch. Both feed `rescheduleAll(batch)` → `ReschedulingService.propose()`.
-- **Dedupe:** skip when a `PENDING` suggestion already exists for the same appointment + trigger
-  (checked before the engine runs and again inside the write transaction). Manual Suggest
-  (`ReschedulingService.suggestManually()`) is broader: it returns any `PENDING` suggestion for the
+- **Dedupe:** an appointment has at most one `PENDING` suggestion, and `ReschedulingService` owns that rule.
+  The agent skips when a `PENDING` suggestion already exists for the same appointment + trigger (checked
+  before the engine runs and again inside the write transaction). A new suggestion with a different trigger
+  supersedes (rejects) the older pending one, because it describes the patient's newer situation. Manual
+  Suggest (`ReschedulingService.suggestManually()`) is broader: it returns any `PENDING` suggestion for the
   appointment, whatever its trigger, so staff never get a second one beside the agent's.
 - **No LLM call inside a transaction:** read snapshot (short tx) → engine (no tx) → write suggestion
   (short tx). A slow model never blocks the single SQLite connection.

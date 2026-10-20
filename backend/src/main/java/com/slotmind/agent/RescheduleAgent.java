@@ -1,12 +1,11 @@
 package com.slotmind.agent;
 
+import com.slotmind.agent.AgentEvents.PlanRequest;
 import com.slotmind.domain.Appointment;
 import com.slotmind.domain.AppointmentStatus;
-import com.slotmind.domain.SuggestionStatus;
 import com.slotmind.domain.TriggerReason;
 import com.slotmind.repo.AppointmentRepository;
 import com.slotmind.repo.SlotRepository;
-import com.slotmind.repo.SuggestionRepository;
 import com.slotmind.service.ReschedulingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +15,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Stream;
 
 /**
  * The agentic loop. Separate listeners per trigger (they differ in how affected appointments are found),
@@ -26,20 +26,16 @@ import java.util.*;
 public class RescheduleAgent {
 
     private static final Logger log = LoggerFactory.getLogger(RescheduleAgent.class);
-    private static final EnumSet<AppointmentStatus> BOOKED =
-            EnumSet.of(AppointmentStatus.CONFIRMED, AppointmentStatus.RESCHEDULED, AppointmentStatus.RESCHEDULE_PENDING);
 
     private final AppointmentRepository appointments;
     private final SlotRepository slots;
-    private final SuggestionRepository suggestions;
     private final ReschedulingService rescheduling;
     private final AgentActivityLog activity;
 
-    public RescheduleAgent(AppointmentRepository appointments, SlotRepository slots, SuggestionRepository suggestions,
+    public RescheduleAgent(AppointmentRepository appointments, SlotRepository slots,
                            ReschedulingService rescheduling, AgentActivityLog activity) {
         this.appointments = appointments;
         this.slots = slots;
-        this.suggestions = suggestions;
         this.rescheduling = rescheduling;
         this.activity = activity;
     }
@@ -47,7 +43,8 @@ public class RescheduleAgent {
     @Async("agentExecutor")
     @TransactionalEventListener(fallbackExecution = true)
     public void on(AgentEvents.ProviderWentOffline event) {
-        List<AgentEvents.Superseded> batch = batch(needingPlan(appointments.findByProviderIdAndStatusIn(event.providerId(), BOOKED)),
+        List<PlanRequest> batch = batch(
+                needingPlan(appointments.findByProviderIdAndStatusIn(event.providerId(), AppointmentStatus.OCCUPYING_SLOT)),
                 TriggerReason.PROVIDER_OFFLINE, event.invalidated());
         activity.info("Provider " + event.providerId() + " offline: " + batch.size() + " affected appointment(s)"
                 + (batch.size() > 1 ? ", urgent first" : ""));
@@ -57,7 +54,8 @@ public class RescheduleAgent {
     @Async("agentExecutor")
     @TransactionalEventListener(fallbackExecution = true)
     public void on(AgentEvents.SlotWasCancelled event) {
-        List<AgentEvents.Superseded> batch = batch(needingPlan(appointments.findBySlotIdAndStatusIn(event.slotId(), BOOKED)),
+        List<PlanRequest> batch = batch(
+                needingPlan(appointments.findBySlotIdAndStatusIn(event.slotId(), AppointmentStatus.OCCUPYING_SLOT)),
                 TriggerReason.SLOT_CANCELLED, event.invalidated());
         activity.info("Slot " + event.slotId() + " cancelled: " + batch.size() + " affected appointment(s)");
         rescheduleAll(batch);
@@ -74,33 +72,26 @@ public class RescheduleAgent {
     /** A RESCHEDULE_PENDING booking still waiting on a valid pending suggestion needs nothing new. */
     private List<Appointment> needingPlan(List<Appointment> booked) {
         return booked.stream()
-                .filter(a -> a.getStatus() != AppointmentStatus.RESCHEDULE_PENDING
-                        || suggestions.findByAppointmentIdAndStatus(a.getId(), SuggestionStatus.PENDING).isEmpty())
+                .filter(a -> a.getStatus() != AppointmentStatus.RESCHEDULE_PENDING || !rescheduling.hasPending(a.getId()))
                 .toList();
     }
 
     /**
      * One disruption, one triaged batch: the bookings it hit directly (with the disruption's trigger) and the
      * patients whose pending suggestion it invalidated (with the trigger chosen when it was rejected).
+     * A patient in both keeps the disruption's trigger.
      */
-    private List<AgentEvents.Superseded> batch(List<Appointment> direct, TriggerReason disruption,
-                                               List<AgentEvents.Superseded> invalidated) {
-        Map<String, TriggerReason> triggers = new HashMap<>();
-        direct.forEach(a -> triggers.put(a.getId(), disruption));
-        invalidated.forEach(i -> triggers.putIfAbsent(i.appointmentId(), i.trigger()));
-        return triaged(triggers);
+    private List<PlanRequest> batch(List<Appointment> direct, TriggerReason disruption, List<PlanRequest> invalidated) {
+        return triaged(Stream.concat(direct.stream().map(a -> new PlanRequest(a.getId(), disruption)), invalidated.stream())
+                .toList());
     }
 
-    /** Re-proposals after an accept took their slot: same urgent-first order, each keeping its own trigger. */
-    private List<AgentEvents.Superseded> triaged(List<AgentEvents.Superseded> items) {
+    /** Urgent first, each appointment once (its first request wins), each keeping its own trigger. */
+    private List<PlanRequest> triaged(List<PlanRequest> requests) {
         Map<String, TriggerReason> triggers = new HashMap<>();
-        items.forEach(i -> triggers.putIfAbsent(i.appointmentId(), i.trigger()));
-        return triaged(triggers);
-    }
-
-    private List<AgentEvents.Superseded> triaged(Map<String, TriggerReason> triggers) {
+        requests.forEach(r -> triggers.putIfAbsent(r.appointmentId(), r.trigger()));
         return triage(appointments.findAllById(triggers.keySet())).stream()
-                .map(id -> new AgentEvents.Superseded(id, triggers.get(id)))
+                .map(id -> new PlanRequest(id, triggers.get(id)))
                 .toList();
     }
 
@@ -120,8 +111,8 @@ public class RescheduleAgent {
     }
 
     /** Sequential on purpose: each new suggestion Holds its slot before the next appointment is planned. */
-    private void rescheduleAll(List<AgentEvents.Superseded> batch) {
-        for (AgentEvents.Superseded item : batch) {
+    private void rescheduleAll(List<PlanRequest> batch) {
+        for (PlanRequest item : batch) {
             try {
                 rescheduling.propose(item.appointmentId(), item.trigger());
             } catch (Exception e) {

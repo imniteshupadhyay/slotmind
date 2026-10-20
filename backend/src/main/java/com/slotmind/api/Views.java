@@ -67,7 +67,7 @@ public class Views {
     }
 
     public ProviderView provider(String id) {
-        return ProviderView.of(providers.findById(id).orElseThrow(() -> new NotFoundException("Provider", id)));
+        return ProviderView.of(providers.require(id));
     }
 
     public List<SlotView> slots(String providerId, SlotStatus status) {
@@ -89,7 +89,7 @@ public class Views {
     private static Map<String, Appointment> activeBySlot(Lookup l) {
         Map<String, Appointment> bySlot = new HashMap<>();
         l.appointments().values().stream()
-                .filter(a -> a.getStatus() != AppointmentStatus.COMPLETED)
+                .filter(a -> a.getStatus().occupiesSlot())
                 .forEach(a -> bySlot.put(a.getSlotId(), a));
         return bySlot;
     }
@@ -127,7 +127,7 @@ public class Views {
     }
 
     public SuggestionView suggestion(String id) {
-        return suggestion(suggestions.findById(id).orElseThrow(() -> new NotFoundException("Suggestion", id)), lookup());
+        return suggestion(suggestions.require(id), lookup());
     }
 
     private AppointmentView appointment(Appointment a, Lookup l, RescheduleSuggestion pending) {

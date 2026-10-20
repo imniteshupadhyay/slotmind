@@ -1,6 +1,7 @@
 package com.slotmind;
 
 import com.slotmind.domain.*;
+import com.slotmind.repo.ProviderRepository;
 import com.slotmind.repo.SuggestionRepository;
 import com.slotmind.service.BookingService;
 import com.slotmind.service.ReschedulingService;
@@ -22,7 +23,19 @@ class DisruptionInvalidationTest {
     @Autowired SeedService seed;
     @Autowired BookingService booking;
     @Autowired ReschedulingService rescheduling;
+    @Autowired ProviderRepository providers;
     @Autowired SuggestionRepository suggestions;
+
+    @Test
+    void pendingSuggestionWithADanglingSlotIdDoesNotBlockADisruption() {
+        seed.reset();
+        suggestions.save(new RescheduleSuggestion(Ids.next("SUG"), "APT-004", "SLT-GONE", null,
+                0.9, "points nowhere", TriggerReason.INITIAL, "rule"));
+
+        booking.changeProviderStatus("PRV-001", ProviderStatus.OFFLINE);
+
+        assertThat(providers.findById("PRV-001").orElseThrow().getStatus()).isEqualTo(ProviderStatus.OFFLINE);
+    }
 
     @Test
     void suggestedProviderGoingOfflineRePlansThePatientKeepingTheTrigger() throws InterruptedException {

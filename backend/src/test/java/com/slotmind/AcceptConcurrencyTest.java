@@ -2,6 +2,7 @@ package com.slotmind;
 
 import com.slotmind.domain.*;
 import com.slotmind.repo.AppointmentRepository;
+import com.slotmind.repo.ProviderRepository;
 import com.slotmind.repo.SlotRepository;
 import com.slotmind.repo.SuggestionRepository;
 import com.slotmind.service.BookingService;
@@ -31,6 +32,7 @@ class AcceptConcurrencyTest {
     @Autowired SeedService seed;
     @Autowired BookingService booking;
     @Autowired AppointmentRepository appointments;
+    @Autowired ProviderRepository providers;
     @Autowired SlotRepository slots;
     @Autowired SuggestionRepository suggestions;
     @Autowired TransactionTemplate tx;
@@ -94,9 +96,9 @@ class AcceptConcurrencyTest {
     }
 
     /*
-     * The pool has one connection, so two transactions can never interleave. A JDBC write on that same
-     * connection plays the other staff member: it changes the row and bumps its version after we loaded it,
-     * which is what a second connection would do if the pool ever grew.
+     * The pool has one connection, so two transactions can never interleave and a true cross-transaction race
+     * cannot be staged. These tests prove only the mechanism: a row the transaction loaded has gone stale by
+     * commit (a JDBC write on the same connection bumped its version), and the version check rejects the commit.
      */
 
     @Test
@@ -109,7 +111,7 @@ class AcceptConcurrencyTest {
     }
 
     @Test
-    void acceptFailsWhenItsProviderGoesOfflineBeforeCommit() {
+    void acceptFailsWhenItsProviderRowIsStaleAtCommit() {
         tx.executeWithoutResult(s -> {
             appointments.findById("APT-001").orElseThrow().markReschedulePending();
             suggestions.save(new RescheduleSuggestion("SUG-D", "APT-001", "SLT-005", "PRV-004", 0.8, "d", TriggerReason.PROVIDER_OFFLINE, "rule"));
@@ -117,10 +119,26 @@ class AcceptConcurrencyTest {
 
         assertThatThrownBy(() -> tx.executeWithoutResult(s -> {
             booking.accept("SUG-D"); // passes the isBookable() check: PRV-004 is still available here
+            // stands in for a status change committed elsewhere; it runs inside the accept's own transaction
             jdbc.update("update providers set status = 'OFFLINE', version = version + 1 where id = ?", "PRV-004");
         })).isInstanceOf(OptimisticLockingFailureException.class);
 
         assertThat(appointments.findById("APT-001").orElseThrow().getSlotId()).isEqualTo("SLT-001");
         assertThat(slots.findById("SLT-005").orElseThrow().getStatus()).isEqualTo(SlotStatus.OPEN);
+    }
+
+    @Test
+    void providerStatusChangeReadBeforeAnAcceptCommitsIsRejected() {
+        tx.executeWithoutResult(s -> {
+            appointments.findById("APT-001").orElseThrow().markReschedulePending();
+            suggestions.save(new RescheduleSuggestion("SUG-E", "APT-001", "SLT-005", "PRV-004", 0.8, "e", TriggerReason.PROVIDER_OFFLINE, "rule"));
+        });
+        Provider readBeforeAccept = providers.findById("PRV-004").orElseThrow(); // detached copy, pre-accept version
+
+        booking.accept("SUG-E"); // writes the provider's version, so the stale copy below can no longer commit
+
+        readBeforeAccept.changeStatus(ProviderStatus.OFFLINE);
+        assertThatThrownBy(() -> providers.save(readBeforeAccept)).isInstanceOf(OptimisticLockingFailureException.class);
+        assertThat(providers.findById("PRV-004").orElseThrow().isBookable()).isTrue();
     }
 }

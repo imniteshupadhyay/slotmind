@@ -130,6 +130,15 @@ transactional listeners · a message broker.
 - **Batch fairness:** the agent processes a batch sequentially on a single-thread executor. Each new
   pending suggestion places a Hold on its slot, so the next patient in the batch gets a different slot
   (provider offline → two patients → two different openings).
+- **Urgent first, on every agent path:** every batch the agent plans is triaged `URGENT → FOLLOW_UP → ROUTINE`,
+  ties broken by the earliest original time. This covers disruption batches and the re-proposals after an
+  accept supersedes other patients' suggestions (`SuggestionsSuperseded`). Each re-proposal keeps its own trigger.
+- **Human-initiated proposals race the agent:** manual `POST /appointments/{id}/suggest` runs on the request thread,
+  and the SSE stream runs on `streamExecutor`. Neither is serialised with the agent thread, so a manual
+  proposal can take a slot (place a Hold) ahead of an urgent patient still waiting in an agent batch. We accept
+  this. Holds are soft (the agent relaxes them when nothing else of the right specialty is left), and accept
+  is atomic (`@Version` → 409), so a race can cost a patient their preferred slot but can never double-book one.
+  Serialising would queue a staff member's click behind a whole LLM batch.
 - **Failure:** AI failure → rule-based fallback (ADR-2). Any other exception is logged and shown in the
   agent activity feed, and the batch continues. Nothing is dropped silently.
 - **Human checkpoint:** the agent only *proposes*. The appointment becomes `RESCHEDULE_PENDING`; the

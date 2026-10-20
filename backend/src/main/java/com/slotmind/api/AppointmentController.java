@@ -63,13 +63,10 @@ public class AppointmentController {
         return views.appointment(id);
     }
 
-    /** Only COMPLETED can be set directly; other transitions happen through suggestions. */
+    /** Only COMPLETED can be set directly (enforced by {@code Appointment.changeStatus}). */
     @PatchMapping("/{id}/status")
     public Views.AppointmentView changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
-        if (req.status() != AppointmentStatus.COMPLETED) {
-            throw new DomainException("Only COMPLETED can be set directly; use suggestions to reschedule");
-        }
-        booking.complete(id);
+        booking.changeAppointmentStatus(id, req.status());
         return views.appointment(id);
     }
 

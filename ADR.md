@@ -23,9 +23,12 @@ lifecycle) must hold no matter which caller — HTTP, the async agent, or a futu
 
 **Decision.** Option 2.
 - `Slot.book()` refuses anything but `OPEN`; `Slot.release()` frees a booked slot but leaves a
-  cancelled one cancelled; `Slot.changeStatus()` refuses direct `BOOKED`.
+  cancelled one cancelled; `Slot.changeStatus()` refuses direct `BOOKED` and refuses reopening a
+  `BOOKED` slot (its appointment must move first).
 - `AppointmentStatus.next()` encodes `CONFIRMED → RESCHEDULE_PENDING → RESCHEDULED → COMPLETED`
   (a `RESCHEDULED` appointment can be disrupted again); `Appointment.transition()` enforces it.
+  `Appointment.changeStatus()` (the staff-facing path) accepts only `COMPLETED`; every other move
+  goes through suggestions.
 - `RescheduleSuggestion.accept()/reject()` only from `PENDING`.
 - `BookingService` (commands) and `ReschedulingService` (proposals) orchestrate; the **scheduling
   decision itself** lives behind the `SchedulingStrategy` contract (ADR-2), not in services or entities.

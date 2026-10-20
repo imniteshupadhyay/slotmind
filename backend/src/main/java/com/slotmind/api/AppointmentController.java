@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.slotmind.domain.AppointmentStatus;
 import com.slotmind.domain.AppointmentType;
 import com.slotmind.domain.DomainException;
-import com.slotmind.domain.TriggerReason;
 import com.slotmind.service.BookingService;
 import com.slotmind.service.ReschedulingService;
 import jakarta.validation.Valid;
@@ -29,6 +28,8 @@ public class AppointmentController {
                               @NotBlank String providerId, @NotBlank String slotId) {}
 
     public record StatusRequest(@NotNull AppointmentStatus status) {}
+
+    private static final String NO_SLOT = "No open slot with the right specialty is available for this appointment";
 
     private final BookingService booking;
     private final ReschedulingService rescheduling;
@@ -62,21 +63,18 @@ public class AppointmentController {
         return views.appointment(id);
     }
 
-    /** Only COMPLETED can be set directly; other transitions happen through suggestions. */
+    /** Only COMPLETED can be set directly (enforced by {@code Appointment.changeStatus}). */
     @PatchMapping("/{id}/status")
     public Views.AppointmentView changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
-        if (req.status() != AppointmentStatus.COMPLETED) {
-            throw new DomainException("Only COMPLETED can be set directly; use suggestions to reschedule");
-        }
-        booking.complete(id);
+        booking.changeAppointmentStatus(id, req.status());
         return views.appointment(id);
     }
 
     /** On-demand (manual) suggestion, synchronous. Uses the same engine as the agent. */
     @PostMapping("/{id}/suggest")
     public Views.SuggestionView suggest(@PathVariable String id) {
-        var proposal = rescheduling.propose(id, TriggerReason.INITIAL)
-                .orElseThrow(() -> new DomainException("No open slot is available for this appointment"));
+        var proposal = rescheduling.suggestManually(id)
+                .orElseThrow(() -> new DomainException(NO_SLOT));
         return views.suggestion(proposal.suggestion().getId());
     }
 
@@ -89,9 +87,9 @@ public class AppointmentController {
         SseEmitter emitter = new SseEmitter(120_000L);
         streamExecutor.execute(() -> {
             try {
-                var proposal = rescheduling.propose(id, TriggerReason.INITIAL, chunk -> send(emitter, "token", Map.of("text", chunk)));
+                var proposal = rescheduling.suggestManually(id, chunk -> send(emitter, "token", Map.of("text", chunk)));
                 if (proposal.isEmpty()) {
-                    send(emitter, "error", Map.of("message", "No open slot is available for this appointment"));
+                    send(emitter, "error", Map.of("message", NO_SLOT));
                 } else {
                     send(emitter, "suggestion", views.suggestion(proposal.get().suggestion().getId()));
                 }

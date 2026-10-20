@@ -1,6 +1,7 @@
 package com.slotmind.api;
 
 import com.slotmind.domain.*;
+import com.slotmind.engine.StrategyLabel;
 import com.slotmind.repo.AppointmentRepository;
 import com.slotmind.repo.ProviderRepository;
 import com.slotmind.repo.SlotRepository;
@@ -18,6 +19,12 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class Views {
 
+    public record ProviderView(String id, String name, Specialty specialty, ProviderStatus status, boolean bookable) {
+        static ProviderView of(Provider p) {
+            return new ProviderView(p.getId(), p.getName(), p.getSpecialty(), p.getStatus(), p.isBookable());
+        }
+    }
+
     public record SlotView(String id, String providerId, String providerName, LocalDateTime startTime,
                            int durationMinutes, SlotStatus status, String appointmentId, String patientName) {}
 
@@ -26,7 +33,7 @@ public class Views {
                                  String slotProviderId, String slotProviderName, String alternateProviderId,
                                  String alternateProviderName, double confidence, String reasoning,
                                  SuggestionStatus status, TriggerReason triggerReason, String strategy,
-                                 LocalDateTime createdAt, LocalDateTime decidedAt) {}
+                                 boolean fallback, String fallbackReason, LocalDateTime createdAt, LocalDateTime decidedAt) {}
 
     public record AppointmentView(String id, String patientName, AppointmentType appointmentType, AppointmentStatus status,
                                   String providerId, String providerName, ProviderStatus providerStatus, String slotId,
@@ -55,26 +62,43 @@ public class Views {
                 appointments.findAll().stream().collect(Collectors.toMap(Appointment::getId, Function.identity())));
     }
 
-    public List<Provider> providers() {
-        return providers.findAll(org.springframework.data.domain.Sort.by("id"));
+    public List<ProviderView> providers() {
+        return providers.findAll(org.springframework.data.domain.Sort.by("id")).stream().map(ProviderView::of).toList();
+    }
+
+    public ProviderView provider(String id) {
+        return ProviderView.of(providers.require(id));
     }
 
     public List<SlotView> slots(String providerId, SlotStatus status) {
         Lookup l = lookup();
-        Map<String, Appointment> bySlot = new HashMap<>();
-        l.appointments().values().stream()
-                .filter(a -> a.getStatus() != AppointmentStatus.COMPLETED)
-                .forEach(a -> bySlot.put(a.getSlotId(), a));
+        Map<String, Appointment> bySlot = activeBySlot(l);
         return slots.findAllByOrderByStartTimeAsc().stream()
                 .filter(s -> providerId == null || s.getProviderId().equals(providerId))
                 .filter(s -> status == null || s.getStatus() == status)
-                .map(s -> {
-                    Appointment a = bySlot.get(s.getId());
-                    Provider p = l.providers().get(s.getProviderId());
-                    return new SlotView(s.getId(), s.getProviderId(), p == null ? null : p.getName(), s.getStartTime(),
-                            s.getDurationMinutes(), s.getStatus(), a == null ? null : a.getId(), a == null ? null : a.getPatientName());
-                })
+                .map(s -> slot(s, l, bySlot))
                 .toList();
+    }
+
+    public SlotView slot(String id) {
+        Lookup l = lookup();
+        Slot s = Optional.ofNullable(l.slots().get(id)).orElseThrow(() -> new NotFoundException("Slot", id));
+        return slot(s, l, activeBySlot(l));
+    }
+
+    private static Map<String, Appointment> activeBySlot(Lookup l) {
+        Map<String, Appointment> bySlot = new HashMap<>();
+        l.appointments().values().stream()
+                .filter(a -> a.getStatus().occupiesSlot())
+                .forEach(a -> bySlot.put(a.getSlotId(), a));
+        return bySlot;
+    }
+
+    private static SlotView slot(Slot s, Lookup l, Map<String, Appointment> bySlot) {
+        Appointment a = bySlot.get(s.getId());
+        Provider p = l.providers().get(s.getProviderId());
+        return new SlotView(s.getId(), s.getProviderId(), p == null ? null : p.getName(), s.getStartTime(),
+                s.getDurationMinutes(), s.getStatus(), a == null ? null : a.getId(), a == null ? null : a.getPatientName());
     }
 
     public List<AppointmentView> appointments(AppointmentStatus status) {
@@ -103,7 +127,7 @@ public class Views {
     }
 
     public SuggestionView suggestion(String id) {
-        return suggestion(suggestions.findById(id).orElseThrow(() -> new NotFoundException("Suggestion", id)), lookup());
+        return suggestion(suggestions.require(id), lookup());
     }
 
     private AppointmentView appointment(Appointment a, Lookup l, RescheduleSuggestion pending) {
@@ -125,6 +149,7 @@ public class Views {
                 slot == null ? null : slot.getStartTime(), slot == null ? 0 : slot.getDurationMinutes(),
                 slot == null ? null : slot.getProviderId(), slotProvider == null ? null : slotProvider.getName(),
                 s.getAlternateProviderId(), alt == null ? null : alt.getName(), s.getConfidence(), s.getReasoning(),
-                s.getStatus(), s.getTriggerReason(), s.getStrategy(), s.getCreatedAt(), s.getDecidedAt());
+                s.getStatus(), s.getTriggerReason(), s.getStrategy(), StrategyLabel.isFallback(s.getStrategy()),
+                StrategyLabel.fallbackReason(s.getStrategy()), s.getCreatedAt(), s.getDecidedAt());
     }
 }

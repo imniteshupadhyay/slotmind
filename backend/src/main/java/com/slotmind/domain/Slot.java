@@ -44,10 +44,16 @@ public class Slot {
         }
     }
 
-    /** Returns true when this change cancels the slot, i.e. re-scheduling must be triggered. */
+    /**
+     * Staff-driven status change. A booked slot cannot be reopened directly: its appointment must move first.
+     * Returns true when this change cancels the slot, i.e. re-scheduling must be triggered.
+     */
     public boolean changeStatus(SlotStatus target) {
         if (target == SlotStatus.BOOKED) {
             throw new DomainException("Slots are booked through appointments, not directly");
+        }
+        if (status == SlotStatus.BOOKED && target == SlotStatus.OPEN) {
+            throw new DomainException("Slot " + id + " is booked; reschedule the appointment instead");
         }
         boolean cancelling = target == SlotStatus.CANCELLED && status != SlotStatus.CANCELLED;
         this.status = target;

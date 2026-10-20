@@ -21,15 +21,14 @@ import java.util.stream.Collectors;
 
 /**
  * Produces a {@link RescheduleSuggestion} for one appointment. Shared by the HTTP "suggest" endpoints and
- * the async agent, so both go through the same engine contract.
+ * the async agent, so both go through the same engine contract. Owns the rule that an appointment has at most
+ * one PENDING suggestion.
  *
  * <p>Three phases so the (possibly slow) LLM call never holds the single SQLite connection:
  * read snapshot (short tx) -> run engine (no tx) -> write suggestion (short tx, re-checking dedupe).
  */
 @Service
 public class ReschedulingService {
-
-    private static final int MAX_CANDIDATES = 25;
 
     private final AppointmentRepository appointments;
     private final ProviderRepository providers;
@@ -54,25 +53,61 @@ public class ReschedulingService {
     /** Result of a proposal attempt; {@code created=false} means an existing pending suggestion was reused. */
     public record Proposal(RescheduleSuggestion suggestion, boolean created) {}
 
+    /** Which existing pending suggestion a proposal reuses instead of planning a new one. */
+    private enum Reuse {
+        /** Agent: the same trigger is a duplicate; a new trigger supersedes the older suggestion. */
+        SAME_TRIGGER,
+        /** Manual Suggest: any pending suggestion answers the staff click. */
+        ANY_TRIGGER;
+
+        Optional<RescheduleSuggestion> pick(List<RescheduleSuggestion> pending, TriggerReason trigger) {
+            return pending.stream().filter(s -> this == ANY_TRIGGER || s.getTriggerReason() == trigger).findFirst();
+        }
+    }
+
+    /** True while the appointment is waiting on a PENDING suggestion. */
+    public boolean hasPending(String appointmentId) {
+        return !pending(appointmentId).isEmpty();
+    }
+
     public Optional<Proposal> propose(String appointmentId, TriggerReason trigger) {
         return propose(appointmentId, trigger, text -> {});
     }
 
+    /**
+     * Agent path: reuses a pending suggestion with the same trigger. Otherwise the new suggestion supersedes
+     * (rejects) the appointment's other pending ones, which describe an older situation.
+     */
     public Optional<Proposal> propose(String appointmentId, TriggerReason trigger, Consumer<String> progress) {
-        Optional<RescheduleSuggestion> existing = existingPending(appointmentId, trigger);
+        return propose(appointmentId, trigger, progress, Reuse.SAME_TRIGGER);
+    }
+
+    /** Manual Suggest (staff click): reuses ANY pending suggestion for the appointment, whatever its trigger. */
+    public Optional<Proposal> suggestManually(String appointmentId) {
+        return suggestManually(appointmentId, text -> {});
+    }
+
+    public Optional<Proposal> suggestManually(String appointmentId, Consumer<String> progress) {
+        return propose(appointmentId, TriggerReason.INITIAL, progress, Reuse.ANY_TRIGGER);
+    }
+
+    private Optional<Proposal> propose(String appointmentId, TriggerReason trigger, Consumer<String> progress, Reuse reuse) {
+        Optional<RescheduleSuggestion> existing = reuse.pick(pending(appointmentId), trigger);
         if (existing.isPresent()) {
-            activity.info("Skipped " + appointmentId + ": a pending " + trigger + " suggestion already exists");
+            activity.info("Skipped " + appointmentId + ": a pending " + existing.get().getTriggerReason()
+                    + " suggestion already exists");
             return existing.map(s -> new Proposal(s, false));
         }
 
         SchedulingContext ctx = tx.execute(status -> buildContext(appointmentId, trigger));
         Optional<SchedulingEngine.Outcome> outcome = engine.recommend(ctx, progress);
         if (outcome.isEmpty()) {
-            activity.warn("No open slot found for " + ctx.appointment().getPatientName() + " (" + appointmentId + ")");
+            activity.warn("No " + ctx.originalProvider().getSpecialty() + " slot available for " + ctx.appointment().getPatientName()
+                    + " (" + appointmentId + "), needs a call from staff");
             return Optional.empty();
         }
 
-        Proposal proposal = tx.execute(status -> save(appointmentId, trigger, outcome.get()));
+        Proposal proposal = tx.execute(status -> save(appointmentId, trigger, reuse, outcome.get()));
         if (proposal.created()) {
             Slot slot = ctx.candidate(proposal.suggestion().getRecommendedSlotId());
             activity.success("Suggested " + ctx.providerOf(slot).getName() + " " + Phrases.when(slot.getStartTime(), ctx.now())
@@ -81,15 +116,13 @@ public class ReschedulingService {
         return Optional.of(proposal);
     }
 
-    private Optional<RescheduleSuggestion> existingPending(String appointmentId, TriggerReason trigger) {
-        return suggestions.findByAppointmentIdAndStatus(appointmentId, SuggestionStatus.PENDING).stream()
-                .filter(s -> s.getTriggerReason() == trigger)
-                .findFirst();
+    private List<RescheduleSuggestion> pending(String appointmentId) {
+        return suggestions.findByAppointmentIdAndStatus(appointmentId, SuggestionStatus.PENDING);
     }
 
     private SchedulingContext buildContext(String appointmentId, TriggerReason trigger) {
-        Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
-        if (appt.getStatus() == AppointmentStatus.COMPLETED) {
+        Appointment appt = appointments.require(appointmentId);
+        if (!appt.getStatus().occupiesSlot()) {
             throw new DomainException("Appointment " + appointmentId + " is already completed");
         }
         Map<String, Provider> roster = providers.findAll().stream()
@@ -98,7 +131,7 @@ public class ReschedulingService {
         Slot originalSlot = slots.findById(appt.getSlotId()).orElse(null);
         LocalDateTime now = LocalDateTime.now();
 
-        // Soft reservations: slots already offered to OTHER appointments, so a batch (provider offline)
+        // Holds: slots already offered to OTHER appointments, so a batch (provider offline)
         // doesn't propose the same slot to everyone. Also skip slots this patient already rejected.
         Set<String> heldByOthers = new HashSet<>();
         Set<String> rejectedByPatient = new HashSet<>();
@@ -115,18 +148,23 @@ public class ReschedulingService {
                 .filter(s -> !s.getId().equals(appt.getSlotId()))
                 .filter(s -> roster.containsKey(s.getProviderId()) && roster.get(s.getProviderId()).isBookable())
                 .filter(s -> !rejectedByPatient.contains(s.getId()))
+                .filter(s -> roster.get(s.getProviderId()).sameSpecialtyAs(original))
                 .toList();
+        // Relax the Holds only when no unheld slot of the right specialty is left: sharing beats giving up.
         List<Slot> unheld = open.stream().filter(s -> !heldByOthers.contains(s.getId())).toList();
-        List<Slot> candidates = (unheld.isEmpty() ? open : unheld).stream().limit(MAX_CANDIDATES).toList();
+        List<Slot> candidates = (unheld.isEmpty() ? open : unheld).stream().limit(SchedulingContext.MAX_CANDIDATES).toList();
 
         return new SchedulingContext(appt, original, originalSlot, trigger, candidates, roster, now);
     }
 
-    private Proposal save(String appointmentId, TriggerReason trigger, SchedulingEngine.Outcome outcome) {
-        Optional<RescheduleSuggestion> raced = existingPending(appointmentId, trigger);
+    /** Re-checks dedupe inside the write transaction, then keeps the appointment at one PENDING suggestion. */
+    private Proposal save(String appointmentId, TriggerReason trigger, Reuse reuse, SchedulingEngine.Outcome outcome) {
+        List<RescheduleSuggestion> pending = pending(appointmentId);
+        Optional<RescheduleSuggestion> raced = reuse.pick(pending, trigger);
         if (raced.isPresent()) return new Proposal(raced.get(), false);
+        pending.forEach(RescheduleSuggestion::reject); // superseded by the new one
 
-        Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
+        Appointment appt = appointments.require(appointmentId);
         appt.markReschedulePending();
         Recommendation r = outcome.recommendation();
         RescheduleSuggestion s = new RescheduleSuggestion(Ids.next("SUG"), appointmentId, r.slotId(), r.alternateProviderId(),

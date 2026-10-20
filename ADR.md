@@ -23,15 +23,19 @@ lifecycle) must hold no matter which caller — HTTP, the async agent, or a futu
 
 **Decision.** Option 2.
 - `Slot.book()` refuses anything but `OPEN`; `Slot.release()` frees a booked slot but leaves a
-  cancelled one cancelled; `Slot.changeStatus()` refuses direct `BOOKED`.
+  cancelled one cancelled; `Slot.changeStatus()` refuses direct `BOOKED` and refuses reopening a
+  `BOOKED` slot (its appointment must move first).
 - `AppointmentStatus.next()` encodes `CONFIRMED → RESCHEDULE_PENDING → RESCHEDULED → COMPLETED`
   (a `RESCHEDULED` appointment can be disrupted again); `Appointment.transition()` enforces it.
+  `Appointment.changeStatus()` (the staff-facing path) accepts only `COMPLETED`; every other move
+  goes through suggestions.
 - `RescheduleSuggestion.accept()/reject()` only from `PENDING`.
 - `BookingService` (commands) and `ReschedulingService` (proposals) orchestrate; the **scheduling
   decision itself** lives behind the `SchedulingStrategy` contract (ADR-2), not in services or entities.
 
-Booking conflicts are prevented at the domain boundary by `Slot.book()` and, under concurrency, by
-`@Version` optimistic locking (ADR-3). Any violation throws `DomainException` → HTTP 409.
+Booking conflicts are prevented at the domain boundary by `Slot.book()`. With SQLite's single writer,
+racing accepts run in turn, so this check also stops the loser. `@Version` optimistic locking is the
+backstop if the pool ever grows (ADR-3). A `DomainException` or a version conflict → HTTP 409.
 
 **Tradeoffs.** Entities reference each other by id (not JPA relations). That keeps snapshots cheap
 to pass to strategies and avoids lazy-loading surprises, at the cost of a few explicit lookups.
@@ -93,11 +97,26 @@ on `appointments.slot_id`.
    *other* appointments that pointed at the same slot are rejected, and an event asks the agent to
    re-propose for those patients.
 
-Concurrency is handled by **optimistic locking**: `Slot`, `Appointment` and `RescheduleSuggestion` carry
-`@Version`. If two accepts race for one slot, the second commit fails its
-`UPDATE … WHERE version = ?` → `ObjectOptimisticLockingFailureException` → HTTP 409 with a friendly
-message. SQLite additionally serialises writers (one pooled connection + `busy_timeout`).
-`AcceptConcurrencyTest` fires two accepts at the same slot in parallel and asserts exactly one wins.
+Concurrency is handled in two layers:
+- **Today: serialisation + state checks.** SQLite's single writer (one pooled connection +
+  `busy_timeout`) runs racing accepts one after the other. The second one sees the first one's commit,
+  so the state checks reject it: `Slot.book()` refuses the now-`BOOKED` slot, or its suggestion was
+  already superseded. Either throws `DomainException` → HTTP 409.
+- **Backstop: optimistic locking**, for when the pool ever grows. `Slot`, `Appointment`,
+  `RescheduleSuggestion` and `Provider` carry `@Version`. Accept reads the provider with
+  `LockModeType.OPTIMISTIC_FORCE_INCREMENT`, so its commit writes the provider's version even though accept
+  never changes the provider. A plain `OPTIMISTIC` re-check would leave a window between the check and the
+  commit; the forced write closes it, so an accept and a provider status change committing concurrently
+  conflict and one of them fails. A write to a row the accept used that lands first fails the accept's
+  commit (`UPDATE … WHERE version = ?`) → `OptimisticLockingFailureException` → HTTP 409 with a friendly message.
+
+`AcceptConcurrencyTest` covers both layers. It fires two accepts at the same slot in parallel and asserts
+exactly one wins, which proves the first layer. With one pooled connection, transactions can't interleave,
+so a true cross-transaction race can't happen and can't be staged. The backstop tests prove only the
+mechanism, that the version check fires on a stale row: a JDBC write on the same connection bumps a row's
+version after the entity was loaded, inside the same transaction. A stale `Slot` write is rejected, and so
+is an accept whose provider row went stale before commit. A third test shows that accept bumps the
+provider's version, so a provider copy read before the accept can no longer be written.
 
 **Tradeoffs.** Optimistic locking needs no locks held across user think-time and suits low contention.
 The loser gets a 409 and retries, which is acceptable at a front desk. A unique index on `slot_id` was
@@ -120,14 +139,29 @@ transactional listeners · a message broker.
 - `RescheduleAgent` listens with `@TransactionalEventListener` (AFTER_COMMIT) + `@Async("agentExecutor")`,
   so the agent only runs if the status change actually committed, and the HTTP call returns 202 right away.
 - The listeners differ only in *how affected appointments are found*: by provider vs by slot, among
-  `CONFIRMED` and `RESCHEDULED` bookings. Both feed `rescheduleAll(ids, trigger)` → `ReschedulingService.propose()`.
-- **Dedupe:** skip when a `PENDING` suggestion already exists for the same appointment + trigger
-  (checked before the engine runs and again inside the write transaction).
+  `CONFIRMED`, `RESCHEDULED` and `RESCHEDULE_PENDING` bookings that have no pending suggestion left. The status
+  change also rejects every pending suggestion whose slot it made unbookable, and those patients join the same
+  triaged batch. Both feed `rescheduleAll(batch)` → `ReschedulingService.propose()`.
+- **Dedupe:** an appointment has at most one `PENDING` suggestion, and `ReschedulingService` owns that rule.
+  The agent skips when a `PENDING` suggestion already exists for the same appointment + trigger (checked
+  before the engine runs and again inside the write transaction). A new suggestion with a different trigger
+  supersedes (rejects) the older pending one, because it describes the patient's newer situation. Manual
+  Suggest (`ReschedulingService.suggestManually()`) is broader: it returns any `PENDING` suggestion for the
+  appointment, whatever its trigger, so staff never get a second one beside the agent's.
 - **No LLM call inside a transaction:** read snapshot (short tx) → engine (no tx) → write suggestion
   (short tx). A slow model never blocks the single SQLite connection.
 - **Batch fairness:** the agent processes a batch sequentially on a single-thread executor. Each new
-  pending suggestion "soft-reserves" its slot, so the next patient in the batch gets a different slot
+  pending suggestion places a Hold on its slot, so the next patient in the batch gets a different slot
   (provider offline → two patients → two different openings).
+- **Urgent first, on every agent path:** every batch the agent plans is triaged `URGENT → FOLLOW_UP → ROUTINE`,
+  ties broken by the earliest original time. This covers disruption batches and the re-proposals after an
+  accept supersedes other patients' suggestions (`SuggestionsSuperseded`). Each re-proposal keeps its own trigger.
+- **Human-initiated proposals race the agent:** manual `POST /appointments/{id}/suggest` runs on the request thread,
+  and the SSE stream runs on `streamExecutor`. Neither is serialised with the agent thread, so a manual
+  proposal can take a slot (place a Hold) ahead of an urgent patient still waiting in an agent batch. We accept
+  this. Holds are soft (the agent relaxes them when nothing else of the right specialty is left), and accept
+  is atomic (`@Version` → 409), so a race can cost a patient their preferred slot but can never double-book one.
+  Serialising would queue a staff member's click behind a whole LLM batch.
 - **Failure:** AI failure → rule-based fallback (ADR-2). Any other exception is logged and shown in the
   agent activity feed, and the batch continues. Nothing is dropped silently.
 - **Human checkpoint:** the agent only *proposes*. The appointment becomes `RESCHEDULE_PENDING`; the

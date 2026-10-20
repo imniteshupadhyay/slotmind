@@ -11,7 +11,7 @@ import java.util.concurrent.Executor;
 @Configuration
 public class AsyncConfig implements WebMvcConfigurer {
 
-    /** Agent work queue. Single thread keeps batch soft-reservations ordered and suits SQLite's single writer. */
+    /** Agent work queue. Single thread keeps batch Holds ordered and suits SQLite's single writer. */
     @Bean(name = "agentExecutor")
     public Executor agentExecutor() {
         ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();

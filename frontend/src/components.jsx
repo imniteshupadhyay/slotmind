@@ -60,7 +60,7 @@ export function QueueCard({ appt, busy, onDecide, onSuggest, onStream }) {
           <blockquote className="reasoning">“{s.reasoning}”</blockquote>
           <div className="queue-foot">
             <span className={`source ${isAi ? 'ai' : 'rule'}`} title={s.strategy}>
-              {isAi ? '✦ AI' : s.strategy.startsWith('rule (fallback') ? '⚙ Rule (AI fallback)' : '⚙ Rule'} · {fmtAgo(s.createdAt)}
+              {isAi ? '✦ AI' : s.fallback ? '⚙ Rule (AI fallback)' : '⚙ Rule'} · {fmtAgo(s.createdAt)}
             </span>
             <div className="actions">
               <button className="btn ghost" disabled={busy} onClick={() => onDecide(s.id, 'REJECTED')}>Reject</button>

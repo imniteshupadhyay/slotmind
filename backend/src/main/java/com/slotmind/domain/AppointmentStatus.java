@@ -10,6 +10,16 @@ import java.util.Set;
 public enum AppointmentStatus {
     CONFIRMED, RESCHEDULE_PENDING, RESCHEDULED, COMPLETED;
 
+    /**
+     * Every status in which the appointment still occupies its slot: it is shown on that slot, and a disruption
+     * of the slot or its provider re-plans it. Only a COMPLETED appointment is history.
+     */
+    public static final Set<AppointmentStatus> OCCUPYING_SLOT = EnumSet.of(CONFIRMED, RESCHEDULE_PENDING, RESCHEDULED);
+
+    public boolean occupiesSlot() {
+        return OCCUPYING_SLOT.contains(this);
+    }
+
     public Set<AppointmentStatus> next() {
         return switch (this) {
             case CONFIRMED -> EnumSet.of(RESCHEDULE_PENDING, COMPLETED);
@@ -21,10 +31,5 @@ public enum AppointmentStatus {
 
     public boolean canMoveTo(AppointmentStatus target) {
         return next().contains(target);
-    }
-
-    /** The appointment currently holds a booked slot that a disruption can affect. */
-    public boolean isActiveBooking() {
-        return this == CONFIRMED || this == RESCHEDULED;
     }
 }

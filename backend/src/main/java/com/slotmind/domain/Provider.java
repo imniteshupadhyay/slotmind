@@ -12,6 +12,13 @@ public class Provider {
     private Specialty specialty;
     @Enumerated(EnumType.STRING)
     private ProviderStatus status;
+    /**
+     * Optimistic lock: an accept checks this at commit, so a provider going offline mid-accept fails the accept.
+     * The default lets ddl-auto add the column to an existing database without leaving NULL versions behind.
+     */
+    @Version
+    @Column(columnDefinition = "bigint default 0")
+    private Long version;
 
     protected Provider() {}
 
@@ -31,6 +38,11 @@ public class Provider {
 
     public boolean isBookable() {
         return status != ProviderStatus.OFFLINE;
+    }
+
+    /** Re-scheduling never crosses specialty: the one place that rule is checked. */
+    public boolean sameSpecialtyAs(Provider other) {
+        return other != null && specialty == other.specialty;
     }
 
     public String getId() { return id; }

@@ -1,6 +1,7 @@
 package com.slotmind.repo;
 
 import com.slotmind.domain.RescheduleSuggestion;
+import com.slotmind.domain.NotFoundException;
 import com.slotmind.domain.SuggestionStatus;
 import com.slotmind.domain.TriggerReason;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -15,4 +16,9 @@ public interface SuggestionRepository extends JpaRepository<RescheduleSuggestion
     List<RescheduleSuggestion> findByStatus(SuggestionStatus status);
 
     List<RescheduleSuggestion> findAllByOrderByCreatedAtDesc();
+
+    /** The suggestion, or {@link NotFoundException} (-> HTTP 404). */
+    default RescheduleSuggestion require(String id) {
+        return findById(id).orElseThrow(() -> new NotFoundException("Suggestion", id));
+    }
 }

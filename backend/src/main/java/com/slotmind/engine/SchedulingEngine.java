@@ -78,11 +78,11 @@ public class SchedulingEngine {
             return Optional.empty();
         }
         progress.accept("\n[fallback] " + fallbackReason + " - using rule-based strategy\n");
-        String label = RuleBasedStrategy.NAME + " (fallback: " + truncate(fallbackReason) + ")";
+        String label = StrategyLabel.fallback(fallbackReason);
         return firstValid(strategies.get(RuleBasedStrategy.NAME).recommend(ctx), ctx).map(r -> new Outcome(r, label));
     }
 
-    /** Defence in depth: whatever a strategy says, only accept slots that are real, OPEN candidates. */
+    /** Defence in depth: whatever a strategy says, only accept real, OPEN candidates of the original specialty. */
     private Optional<Recommendation> firstValid(List<Recommendation> recs, SchedulingContext ctx) {
         if (recs == null) return Optional.empty();
         for (Recommendation r : recs) {
@@ -93,8 +93,8 @@ public class SchedulingEngine {
             }
             Provider slotProvider = ctx.providerOf(slot);
             if (slotProvider == null || !slotProvider.isBookable()) continue;
-            if (slotProvider.getSpecialty() != ctx.originalProvider().getSpecialty() && sameSpecialtyAvailable(ctx)) {
-                log.warn("Discarding recommendation {}: specialty {} while a {} slot is open",
+            if (!slotProvider.sameSpecialtyAs(ctx.originalProvider())) {
+                log.warn("Discarding recommendation {}: specialty {} does not match {}",
                         slot.getId(), slotProvider.getSpecialty(), ctx.originalProvider().getSpecialty());
                 continue;
             }
@@ -107,15 +107,5 @@ public class SchedulingEngine {
             return Optional.of(new Recommendation(slot.getId(), alternate, confidence, reasoning));
         }
         return Optional.empty();
-    }
-
-    private static boolean sameSpecialtyAvailable(SchedulingContext ctx) {
-        return ctx.candidateSlots().stream()
-                .map(ctx::providerOf)
-                .anyMatch(p -> p != null && p.getSpecialty() == ctx.originalProvider().getSpecialty());
-    }
-
-    private static String truncate(String s) {
-        return s.length() > 200 ? s.substring(0, 200) + "..." : s;
     }
 }

@@ -66,9 +66,6 @@ public class BookingService {
     @Transactional
     public Slot changeSlotStatus(String slotId, SlotStatus status) {
         Slot slot = slot(slotId);
-        if (slot.getStatus() == SlotStatus.BOOKED && status == SlotStatus.OPEN) {
-            throw new DomainException("Slot " + slotId + " is booked; reschedule the appointment instead");
-        }
         if (slot.changeStatus(status)) {
             activity.info("Slot " + slotId + " CANCELLED - agent triggered");
             var invalidated = invalidatePending(s -> s.getId().equals(slotId),
@@ -153,9 +150,9 @@ public class BookingService {
     }
 
     @Transactional
-    public Appointment complete(String appointmentId) {
+    public Appointment changeAppointmentStatus(String appointmentId, AppointmentStatus status) {
         Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
-        appt.complete();
+        appt.changeStatus(status);
         return appt;
     }
 

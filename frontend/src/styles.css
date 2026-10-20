@@ -160,7 +160,8 @@ b { font-weight: 600; }
 .table tr.row-URGENT td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 .table tr.row-ROUTINE td:first-child { box-shadow: inset 3px 0 0 var(--blue); }
 .table tr.row-FOLLOW_UP td:first-child { box-shadow: inset 3px 0 0 var(--green); }
-.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
 
 /* activity */
 .activity { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }

@@ -144,6 +144,7 @@ export function DayView({ providers, slots, onCancel, busyId }) {
 
 export function AppointmentTable({ appointments, busyId, onSuggest, onStream, onComplete }) {
   return (
+    <div className="table-wrap">
     <table className="table">
       <thead>
         <tr><th>Patient</th><th>Type</th><th>Provider</th><th>When</th><th>Status</th><th /></tr>
@@ -156,19 +157,21 @@ export function AppointmentTable({ appointments, busyId, onSuggest, onStream, on
             <td>{a.providerName}{a.providerStatus === 'OFFLINE' && <span className="tag danger">offline</span>}</td>
             <td>{fmtWhen(a.slotStartTime)}{a.slotStatus === 'CANCELLED' && <span className="tag danger">cancelled</span>}</td>
             <td><StatusPill status={a.status} /></td>
-            <td className="row-actions">
+            <td>
               {(a.status === 'CONFIRMED' || a.status === 'RESCHEDULED') && (
-                <>
+                <div className="row-actions">
                   <button className="btn tiny ghost" disabled={busyId === a.id} onClick={() => onSuggest(a.id)}>Suggest</button>
                   <button className="btn tiny ai" disabled={busyId === a.id} onClick={() => onStream(a)}>✦ Stream</button>
                   <button className="btn tiny ghost" disabled={busyId === a.id} onClick={() => onComplete(a.id)}>Complete</button>
-                </>
+                </div>
               )}
+              {a.status === 'RESCHEDULE_PENDING' && <div className="row-actions muted small">Awaiting decision in queue ↑</div>}
             </td>
           </tr>
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 

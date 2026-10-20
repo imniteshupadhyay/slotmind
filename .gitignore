@@ -1,0 +1,16 @@
+# backend
+backend/target/
+backend/*.db
+backend/*.db-*
+*.db
+# frontend
+frontend/node_modules/
+frontend/dist/
+# env / secrets
+.env
+*.local.properties
+application-local.properties
+# ide
+.idea/
+.vscode/
+*.iml

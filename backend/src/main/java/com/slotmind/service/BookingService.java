@@ -1,0 +1,148 @@
+package com.slotmind.service;
+
+import com.slotmind.agent.AgentActivityLog;
+import com.slotmind.agent.AgentEvents;
+import com.slotmind.domain.*;
+import com.slotmind.repo.AppointmentRepository;
+import com.slotmind.repo.ProviderRepository;
+import com.slotmind.repo.SlotRepository;
+import com.slotmind.repo.SuggestionRepository;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+/** All state-changing commands. Each public method is one transaction. */
+@Service
+public class BookingService {
+
+    private final AppointmentRepository appointments;
+    private final ProviderRepository providers;
+    private final SlotRepository slots;
+    private final SuggestionRepository suggestions;
+    private final ApplicationEventPublisher events;
+    private final AgentActivityLog activity;
+
+    public BookingService(AppointmentRepository appointments, ProviderRepository providers, SlotRepository slots,
+                          SuggestionRepository suggestions, ApplicationEventPublisher events, AgentActivityLog activity) {
+        this.appointments = appointments;
+        this.providers = providers;
+        this.slots = slots;
+        this.suggestions = suggestions;
+        this.events = events;
+        this.activity = activity;
+    }
+
+    @Transactional
+    public Appointment book(String patientName, AppointmentType type, String providerId, String slotId) {
+        Provider provider = provider(providerId);
+        if (!provider.isBookable()) throw new DomainException(provider.getName() + " is offline");
+        Slot slot = slot(slotId);
+        if (!slot.getProviderId().equals(providerId)) {
+            throw new DomainException("Slot " + slotId + " does not belong to provider " + providerId);
+        }
+        slot.book(); // throws if not OPEN; @Version guards concurrent bookings
+        return appointments.save(new Appointment(Ids.next("APT"), patientName, type, providerId, slotId));
+    }
+
+    /** Going OFFLINE publishes an event; the agent reacts after commit, asynchronously. */
+    @Transactional
+    public Provider changeProviderStatus(String providerId, ProviderStatus status) {
+        Provider provider = provider(providerId);
+        if (provider.changeStatus(status)) {
+            activity.info(provider.getName() + " went OFFLINE - agent triggered");
+            events.publishEvent(new AgentEvents.ProviderWentOffline(providerId));
+        }
+        return provider;
+    }
+
+    /** Cancelling publishes an event; the agent reacts after commit, asynchronously. */
+    @Transactional
+    public Slot changeSlotStatus(String slotId, SlotStatus status) {
+        Slot slot = slot(slotId);
+        if (slot.getStatus() == SlotStatus.BOOKED && status == SlotStatus.OPEN) {
+            throw new DomainException("Slot " + slotId + " is booked; reschedule the appointment instead");
+        }
+        if (slot.changeStatus(status)) {
+            activity.info("Slot " + slotId + " CANCELLED - agent triggered");
+            events.publishEvent(new AgentEvents.SlotWasCancelled(slotId));
+        }
+        return slot;
+    }
+
+    @Transactional
+    public Slot createSlot(String providerId, LocalDateTime start, int durationMinutes) {
+        provider(providerId);
+        return slots.save(new Slot(Ids.next("SLT"), providerId, start, durationMinutes, SlotStatus.OPEN));
+    }
+
+    /**
+     * Accept = one transaction that updates the suggestion, the appointment, the old slot and the new slot.
+     * Double booking is prevented twice over: {@link Slot#book()} refuses a non-OPEN slot, and the slot's
+     * {@code @Version} makes a concurrent accept of the same slot fail at commit (-> HTTP 409).
+     */
+    @Transactional
+    public RescheduleSuggestion accept(String suggestionId) {
+        RescheduleSuggestion suggestion = suggestion(suggestionId);
+        Appointment appt = appointments.findById(suggestion.getAppointmentId())
+                .orElseThrow(() -> new NotFoundException("Appointment", suggestion.getAppointmentId()));
+        Slot newSlot = slot(suggestion.getRecommendedSlotId());
+        Provider newProvider = provider(newSlot.getProviderId());
+        if (!newProvider.isBookable()) {
+            throw new DomainException(newProvider.getName() + " went offline after this suggestion was made");
+        }
+
+        suggestion.accept();
+        newSlot.book();
+        slots.findById(appt.getSlotId()).ifPresent(Slot::release);
+        appt.rescheduleTo(newSlot.getProviderId(), newSlot.getId());
+        slots.flush(); // surface version conflicts inside this transaction
+
+        List<AgentEvents.Superseded> superseded = new ArrayList<>();
+        for (RescheduleSuggestion other : suggestions.findByStatus(SuggestionStatus.PENDING)) {
+            if (other.getId().equals(suggestion.getId())) continue;
+            if (other.getAppointmentId().equals(appt.getId())) {
+                other.reject(); // alternatives for this appointment are moot now
+            } else if (other.getRecommendedSlotId().equals(newSlot.getId())) {
+                other.reject(); // slot is gone; the agent will find that patient something else
+                superseded.add(new AgentEvents.Superseded(other.getAppointmentId(), other.getTriggerReason()));
+            }
+        }
+        if (!superseded.isEmpty()) {
+            events.publishEvent(new AgentEvents.SuggestionsSuperseded(superseded));
+        }
+        activity.success("Accepted: " + appt.getPatientName() + " moved to " + newProvider.getName() + " (" + newSlot.getId() + ")");
+        return suggestion;
+    }
+
+    /** Reject leaves the appointment RESCHEDULE_PENDING so staff can ask for another option. */
+    @Transactional
+    public RescheduleSuggestion reject(String suggestionId) {
+        RescheduleSuggestion suggestion = suggestion(suggestionId);
+        suggestion.reject();
+        activity.info("Rejected suggestion " + suggestionId + " for appointment " + suggestion.getAppointmentId());
+        return suggestion;
+    }
+
+    @Transactional
+    public Appointment complete(String appointmentId) {
+        Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
+        appt.complete();
+        return appt;
+    }
+
+    private Provider provider(String id) {
+        return providers.findById(id).orElseThrow(() -> new NotFoundException("Provider", id));
+    }
+
+    private Slot slot(String id) {
+        return slots.findById(id).orElseThrow(() -> new NotFoundException("Slot", id));
+    }
+
+    private RescheduleSuggestion suggestion(String id) {
+        return suggestions.findById(id).orElseThrow(() -> new NotFoundException("Suggestion", id));
+    }
+}

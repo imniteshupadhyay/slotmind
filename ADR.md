@@ -23,9 +23,12 @@ lifecycle) must hold no matter which caller — HTTP, the async agent, or a futu
 
 **Decision.** Option 2.
 - `Slot.book()` refuses anything but `OPEN`; `Slot.release()` frees a booked slot but leaves a
-  cancelled one cancelled; `Slot.changeStatus()` refuses direct `BOOKED`.
+  cancelled one cancelled; `Slot.changeStatus()` refuses direct `BOOKED` and refuses reopening a
+  `BOOKED` slot (its appointment must move first).
 - `AppointmentStatus.next()` encodes `CONFIRMED → RESCHEDULE_PENDING → RESCHEDULED → COMPLETED`
   (a `RESCHEDULED` appointment can be disrupted again); `Appointment.transition()` enforces it.
+  `Appointment.changeStatus()` (the staff-facing path) accepts only `COMPLETED`; every other move
+  goes through suggestions.
 - `RescheduleSuggestion.accept()/reject()` only from `PENDING`.
 - `BookingService` (commands) and `ReschedulingService` (proposals) orchestrate; the **scheduling
   decision itself** lives behind the `SchedulingStrategy` contract (ADR-2), not in services or entities.
@@ -124,7 +127,9 @@ transactional listeners · a message broker.
   change also rejects every pending suggestion whose slot it made unbookable, and those patients join the same
   triaged batch. Both feed `rescheduleAll(batch)` → `ReschedulingService.propose()`.
 - **Dedupe:** skip when a `PENDING` suggestion already exists for the same appointment + trigger
-  (checked before the engine runs and again inside the write transaction).
+  (checked before the engine runs and again inside the write transaction). Manual Suggest
+  (`ReschedulingService.suggestManually()`) is broader: it returns any `PENDING` suggestion for the
+  appointment, whatever its trigger, so staff never get a second one beside the agent's.
 - **No LLM call inside a transaction:** read snapshot (short tx) → engine (no tx) → write suggestion
   (short tx). A slow model never blocks the single SQLite connection.
 - **Batch fairness:** the agent processes a batch sequentially on a single-thread executor. Each new

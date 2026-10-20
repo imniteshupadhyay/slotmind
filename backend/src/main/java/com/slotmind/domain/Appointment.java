@@ -55,7 +55,11 @@ public class Appointment {
         this.slotId = newSlotId;
     }
 
-    public void complete() {
+    /** Staff-driven status change. Only COMPLETED can be set directly; other transitions happen through suggestions. */
+    public void changeStatus(AppointmentStatus target) {
+        if (target != AppointmentStatus.COMPLETED) {
+            throw new DomainException("Only COMPLETED can be set directly; use suggestions to reschedule");
+        }
         transition(AppointmentStatus.COMPLETED);
     }
 

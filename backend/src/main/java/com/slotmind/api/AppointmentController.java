@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.slotmind.domain.AppointmentStatus;
 import com.slotmind.domain.AppointmentType;
 import com.slotmind.domain.DomainException;
-import com.slotmind.domain.TriggerReason;
 import com.slotmind.service.BookingService;
 import com.slotmind.service.ReschedulingService;
 import jakarta.validation.Valid;
@@ -64,20 +63,17 @@ public class AppointmentController {
         return views.appointment(id);
     }
 
-    /** Only COMPLETED can be set directly; other transitions happen through suggestions. */
+    /** Only COMPLETED can be set directly (enforced by {@code Appointment.changeStatus}). */
     @PatchMapping("/{id}/status")
     public Views.AppointmentView changeStatus(@PathVariable String id, @Valid @RequestBody StatusRequest req) {
-        if (req.status() != AppointmentStatus.COMPLETED) {
-            throw new DomainException("Only COMPLETED can be set directly; use suggestions to reschedule");
-        }
-        booking.complete(id);
+        booking.changeAppointmentStatus(id, req.status());
         return views.appointment(id);
     }
 
     /** On-demand (manual) suggestion, synchronous. Uses the same engine as the agent. */
     @PostMapping("/{id}/suggest")
     public Views.SuggestionView suggest(@PathVariable String id) {
-        var proposal = rescheduling.propose(id, TriggerReason.INITIAL)
+        var proposal = rescheduling.suggestManually(id)
                 .orElseThrow(() -> new DomainException(NO_SLOT));
         return views.suggestion(proposal.suggestion().getId());
     }
@@ -91,7 +87,7 @@ public class AppointmentController {
         SseEmitter emitter = new SseEmitter(120_000L);
         streamExecutor.execute(() -> {
             try {
-                var proposal = rescheduling.propose(id, TriggerReason.INITIAL, chunk -> send(emitter, "token", Map.of("text", chunk)));
+                var proposal = rescheduling.suggestManually(id, chunk -> send(emitter, "token", Map.of("text", chunk)));
                 if (proposal.isEmpty()) {
                     send(emitter, "error", Map.of("message", NO_SLOT));
                 } else {

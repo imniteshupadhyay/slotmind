@@ -13,12 +13,16 @@ suggestion for the front desk to confirm. Accepting rebooks atomically, with no 
 
 ### 1. Backend (port 8080)
 
+LLM settings go in a git-ignored local file, which is loaded automatically:
+
 ```bash
 cd backend
-# never commit the key — pass it via environment
-export LLM_API_KEY=<your-litellm-key>        # PowerShell: $env:LLM_API_KEY="<key>"
+cp src/main/resources/application-local.properties.example src/main/resources/application-local.properties
+# edit it and set slotmind.llm.api-key (provided by the Zycus team)
 mvn spring-boot:run
 ```
+
+Alternatively, pass the key via environment: `export LLM_API_KEY=<key>` (PowerShell: `$env:LLM_API_KEY="<key>"`).
 
 It seeds the Addendum A data (plus extra open slots) into `backend/slotmind.db` on first start.
 Without a key, or if the gateway is unreachable (it needs the Zycus network/VPN), the AI strategy

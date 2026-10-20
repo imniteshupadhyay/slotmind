@@ -1,0 +1,6 @@
+# Copy to application-local.properties (git-ignored) and fill in the values from the Zycus team.
+slotmind.llm.base-url=https://litellm-qc.zycus.net
+slotmind.llm.api-key=<your-litellm-key>
+slotmind.llm.model=qwen-cursor
+slotmind.llm.product-header=PC1
+slotmind.llm.timeout-seconds=45

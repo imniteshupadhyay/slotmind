@@ -22,9 +22,4 @@ public enum AppointmentStatus {
     public boolean canMoveTo(AppointmentStatus target) {
         return next().contains(target);
     }
-
-    /** The appointment currently holds a booked slot that a disruption can affect. */
-    public boolean isActiveBooking() {
-        return this == CONFIRMED || this == RESCHEDULED;
-    }
 }

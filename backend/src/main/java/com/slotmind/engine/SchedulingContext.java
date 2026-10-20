@@ -30,6 +30,11 @@ public record SchedulingContext(
         Map<String, Provider> providers,
         LocalDateTime now) {
 
+    /** At most this many candidate slots go into a context (nearest first). */
+    public static final int MAX_CANDIDATES = 25;
+    /** The AI prompt lists only the first this-many candidates, to keep it short; the rule strategy sees them all. */
+    public static final int MAX_PROMPT_CANDIDATES = 20;
+
     public Provider providerOf(Slot slot) {
         return providers.get(slot.getProviderId());
     }

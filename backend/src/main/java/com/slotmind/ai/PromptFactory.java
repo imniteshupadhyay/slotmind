@@ -19,7 +19,6 @@ import java.util.stream.Collectors;
 @Component
 public class PromptFactory {
 
-    static final int MAX_CANDIDATES = 20;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private static final String SYSTEM = """
@@ -123,7 +122,7 @@ public class PromptFactory {
 
     private static String slots(SchedulingContext ctx) {
         if (ctx.candidateSlots().isEmpty()) return "(none)";
-        return ctx.candidateSlots().stream().limit(MAX_CANDIDATES).map(s -> slotLine(s, ctx)).collect(Collectors.joining("\n"));
+        return ctx.candidateSlots().stream().limit(SchedulingContext.MAX_PROMPT_CANDIDATES).map(s -> slotLine(s, ctx)).collect(Collectors.joining("\n"));
     }
 
     private static String slotLine(Slot s, SchedulingContext ctx) {

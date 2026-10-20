@@ -29,8 +29,6 @@ import java.util.stream.Collectors;
 @Service
 public class ReschedulingService {
 
-    private static final int MAX_CANDIDATES = 25;
-
     private final AppointmentRepository appointments;
     private final ProviderRepository providers;
     private final SlotRepository slots;
@@ -106,7 +104,7 @@ public class ReschedulingService {
     }
 
     private SchedulingContext buildContext(String appointmentId, TriggerReason trigger) {
-        Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
+        Appointment appt = appointments.require(appointmentId);
         if (appt.getStatus() == AppointmentStatus.COMPLETED) {
             throw new DomainException("Appointment " + appointmentId + " is already completed");
         }
@@ -133,11 +131,11 @@ public class ReschedulingService {
                 .filter(s -> !s.getId().equals(appt.getSlotId()))
                 .filter(s -> roster.containsKey(s.getProviderId()) && roster.get(s.getProviderId()).isBookable())
                 .filter(s -> !rejectedByPatient.contains(s.getId()))
-                .filter(s -> roster.get(s.getProviderId()).getSpecialty() == original.getSpecialty()) // never cross specialty
+                .filter(s -> roster.get(s.getProviderId()).sameSpecialtyAs(original))
                 .toList();
         // Relax the Holds only when no unheld slot of the right specialty is left: sharing beats giving up.
         List<Slot> unheld = open.stream().filter(s -> !heldByOthers.contains(s.getId())).toList();
-        List<Slot> candidates = (unheld.isEmpty() ? open : unheld).stream().limit(MAX_CANDIDATES).toList();
+        List<Slot> candidates = (unheld.isEmpty() ? open : unheld).stream().limit(SchedulingContext.MAX_CANDIDATES).toList();
 
         return new SchedulingContext(appt, original, originalSlot, trigger, candidates, roster, now);
     }
@@ -147,7 +145,7 @@ public class ReschedulingService {
         Optional<RescheduleSuggestion> raced = existingPending(appointmentId, trigger, reuseAnyTrigger);
         if (raced.isPresent()) return new Proposal(raced.get(), false);
 
-        Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
+        Appointment appt = appointments.require(appointmentId);
         appt.markReschedulePending();
         Recommendation r = outcome.recommendation();
         RescheduleSuggestion s = new RescheduleSuggestion(Ids.next("SUG"), appointmentId, r.slotId(), r.alternateProviderId(),

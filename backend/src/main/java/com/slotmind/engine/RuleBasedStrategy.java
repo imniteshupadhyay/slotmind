@@ -35,7 +35,7 @@ public class RuleBasedStrategy implements SchedulingStrategy {
                 .toList();
         List<Slot> sameSpecialty = ctx.candidateSlots().stream()
                 .filter(s -> !s.getProviderId().equals(original.getId()))
-                .filter(s -> ctx.providerOf(s) != null && ctx.providerOf(s).getSpecialty() == original.getSpecialty())
+                .filter(s -> original.sameSpecialtyAs(ctx.providerOf(s)))
                 .sorted(nearest)
                 .toList();
 

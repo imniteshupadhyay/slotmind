@@ -78,7 +78,7 @@ public class SchedulingEngine {
             return Optional.empty();
         }
         progress.accept("\n[fallback] " + fallbackReason + " - using rule-based strategy\n");
-        String label = RuleBasedStrategy.NAME + " (fallback: " + truncate(fallbackReason) + ")";
+        String label = StrategyLabel.fallback(fallbackReason);
         return firstValid(strategies.get(RuleBasedStrategy.NAME).recommend(ctx), ctx).map(r -> new Outcome(r, label));
     }
 
@@ -93,7 +93,7 @@ public class SchedulingEngine {
             }
             Provider slotProvider = ctx.providerOf(slot);
             if (slotProvider == null || !slotProvider.isBookable()) continue;
-            if (slotProvider.getSpecialty() != ctx.originalProvider().getSpecialty()) {
+            if (!slotProvider.sameSpecialtyAs(ctx.originalProvider())) {
                 log.warn("Discarding recommendation {}: specialty {} does not match {}",
                         slot.getId(), slotProvider.getSpecialty(), ctx.originalProvider().getSpecialty());
                 continue;
@@ -107,9 +107,5 @@ public class SchedulingEngine {
             return Optional.of(new Recommendation(slot.getId(), alternate, confidence, reasoning));
         }
         return Optional.empty();
-    }
-
-    private static String truncate(String s) {
-        return s.length() > 200 ? s.substring(0, 200) + "..." : s;
     }
 }

@@ -40,6 +40,11 @@ public class Provider {
         return status != ProviderStatus.OFFLINE;
     }
 
+    /** Re-scheduling never crosses specialty: the one place that rule is checked. */
+    public boolean sameSpecialtyAs(Provider other) {
+        return other != null && specialty == other.specialty;
+    }
+
     public String getId() { return id; }
     public String getName() { return name; }
     public Specialty getSpecialty() { return specialty; }

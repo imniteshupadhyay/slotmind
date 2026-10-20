@@ -1,7 +1,7 @@
 # Move the two stray lifecycle rules onto the entities
 
 Type: task
-Status: open
+Status: claimed
 Blocked by: none
 
 ## Question

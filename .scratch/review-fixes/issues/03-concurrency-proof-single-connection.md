@@ -1,7 +1,7 @@
 # How do we make the no-double-booking guarantee honest under a single SQLite connection?
 
 Type: grilling
-Status: open
+Status: claimed
 Blocked by: none
 
 ## Question
@@ -19,3 +19,7 @@ The pool size is fixed (map Notes). Decide:
 3. what ADR-3 should say: "SQLite's single writer serialises accepts, the state check in `Slot.book()` rejects the loser, and `@Version` is the backstop if the pool ever grows".
 
 Recommendation: all three.
+
+## Decision
+
+2026-10-20: the user accepted the recommendation above as written (via /implement-spec). Implement it.

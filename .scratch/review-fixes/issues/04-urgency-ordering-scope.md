@@ -1,7 +1,7 @@
 # Which proposal paths must respect urgent-first ordering?
 
 Type: grilling
-Status: open
+Status: claimed
 Blocked by: 02
 
 ## Question
@@ -19,3 +19,7 @@ Decide:
 - whether manual/SSE proposals should be serialised with the agent, or allowed to race. Racing is safe because holds are soft and accept is atomic; the cost is that it gets documented in ADR-4.
 
 Recommendation: sort re-proposal batches, and let human-initiated proposals race (document it in ADR-4).
+
+## Decision
+
+2026-10-20: the user accepted the recommendation above as written (via /implement-spec). Implement it.

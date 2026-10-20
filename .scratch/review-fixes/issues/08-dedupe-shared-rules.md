@@ -1,7 +1,7 @@
 # Give each duplicated rule one home
 
 Type: task
-Status: open
+Status: claimed
 Blocked by: 01
 
 ## Question

@@ -1,7 +1,7 @@
 # Return read views for Provider and Slot; fix the stale LlmProperties Javadoc
 
 Type: task
-Status: open
+Status: claimed
 Blocked by: none
 
 ## Question

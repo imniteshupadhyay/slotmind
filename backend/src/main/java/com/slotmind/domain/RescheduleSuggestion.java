@@ -23,7 +23,7 @@ public class RescheduleSuggestion {
     @Enumerated(EnumType.STRING)
     @Column(name = "trigger_reason")
     private TriggerReason triggerReason;
-    /** Which strategy produced it, e.g. "ai" or "rule (fallback: ...)". */
+    /** Which strategy produced it, e.g. "ai" or "rule (fallback: ...)"; see {@code engine.StrategyLabel}. */
     @Column(length = 500)
     private String strategy;
     @Column(name = "created_at")

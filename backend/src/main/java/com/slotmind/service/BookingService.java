@@ -86,8 +86,7 @@ public class BookingService {
         for (RescheduleSuggestion pending : suggestions.findByStatus(SuggestionStatus.PENDING)) {
             if (!hitSlot.test(slot(pending.getRecommendedSlotId()))) continue;
             pending.reject();
-            Appointment appt = appointments.findById(pending.getAppointmentId())
-                    .orElseThrow(() -> new NotFoundException("Appointment", pending.getAppointmentId()));
+            Appointment appt = appointments.require(pending.getAppointmentId());
             TriggerReason trigger = hitOwnBooking.test(appt) ? disruption : pending.getTriggerReason();
             invalidated.add(new AgentEvents.Superseded(appt.getId(), trigger));
             activity.info("Suggestion for " + appt.getPatientName() + " superseded (" + disruption + ") - re-proposing");
@@ -111,8 +110,7 @@ public class BookingService {
     @Transactional
     public RescheduleSuggestion accept(String suggestionId) {
         RescheduleSuggestion suggestion = suggestion(suggestionId);
-        Appointment appt = appointments.findById(suggestion.getAppointmentId())
-                .orElseThrow(() -> new NotFoundException("Appointment", suggestion.getAppointmentId()));
+        Appointment appt = appointments.require(suggestion.getAppointmentId());
         Slot newSlot = slot(suggestion.getRecommendedSlotId());
         Provider newProvider = providers.findForBookingById(newSlot.getProviderId())
                 .orElseThrow(() -> new NotFoundException("Provider", newSlot.getProviderId()));
@@ -154,7 +152,7 @@ public class BookingService {
 
     @Transactional
     public Appointment changeAppointmentStatus(String appointmentId, AppointmentStatus status) {
-        Appointment appt = appointments.findById(appointmentId).orElseThrow(() -> new NotFoundException("Appointment", appointmentId));
+        Appointment appt = appointments.require(appointmentId);
         appt.changeStatus(status);
         return appt;
     }

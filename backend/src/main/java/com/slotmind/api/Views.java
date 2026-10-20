@@ -1,6 +1,7 @@
 package com.slotmind.api;
 
 import com.slotmind.domain.*;
+import com.slotmind.engine.StrategyLabel;
 import com.slotmind.repo.AppointmentRepository;
 import com.slotmind.repo.ProviderRepository;
 import com.slotmind.repo.SlotRepository;
@@ -32,7 +33,7 @@ public class Views {
                                  String slotProviderId, String slotProviderName, String alternateProviderId,
                                  String alternateProviderName, double confidence, String reasoning,
                                  SuggestionStatus status, TriggerReason triggerReason, String strategy,
-                                 LocalDateTime createdAt, LocalDateTime decidedAt) {}
+                                 boolean fallback, String fallbackReason, LocalDateTime createdAt, LocalDateTime decidedAt) {}
 
     public record AppointmentView(String id, String patientName, AppointmentType appointmentType, AppointmentStatus status,
                                   String providerId, String providerName, ProviderStatus providerStatus, String slotId,
@@ -148,6 +149,7 @@ public class Views {
                 slot == null ? null : slot.getStartTime(), slot == null ? 0 : slot.getDurationMinutes(),
                 slot == null ? null : slot.getProviderId(), slotProvider == null ? null : slotProvider.getName(),
                 s.getAlternateProviderId(), alt == null ? null : alt.getName(), s.getConfidence(), s.getReasoning(),
-                s.getStatus(), s.getTriggerReason(), s.getStrategy(), s.getCreatedAt(), s.getDecidedAt());
+                s.getStatus(), s.getTriggerReason(), s.getStrategy(), StrategyLabel.isFallback(s.getStrategy()),
+                StrategyLabel.fallbackReason(s.getStrategy()), s.getCreatedAt(), s.getDecidedAt());
     }
 }

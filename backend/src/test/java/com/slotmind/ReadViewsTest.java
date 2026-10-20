@@ -87,6 +87,35 @@ class ReadViewsTest {
         assertThat(s.get("providerId").asText()).isEqualTo("PRV-004");
     }
 
+    @Test
+    void aSuggestionFromTheActiveStrategyIsNotMarkedAsFallback() throws Exception {
+        JsonNode s = call(post("/appointments/APT-001/suggest"), 200);
+        assertThat(s.get("strategy").asText()).isEqualTo("rule");
+        assertThat(s.get("fallback").asBoolean()).isFalse();
+        assertThat(s.get("fallbackReason").isNull()).isTrue();
+    }
+
+    @Test
+    void aSuggestionMadeAfterTheAiFailsIsMarkedAsFallbackWithTheReason() throws Exception {
+        setStrategy("ai"); // no API key in tests, so the AI strategy fails and the engine falls back
+        try {
+            JsonNode s = call(post("/appointments/APT-001/suggest"), 200);
+            assertThat(s.get("fallback").asBoolean()).isTrue();
+            assertThat(s.get("fallbackReason").asText()).isEqualTo("ai failed: LLM_API_KEY is not configured");
+
+            JsonNode listed = call(get("/suggestions"), 200).get(0);
+            assertThat(listed.get("id").asText()).isEqualTo(s.get("id").asText());
+            assertThat(listed.get("fallback").asBoolean()).isTrue();
+        } finally {
+            setStrategy("rule");
+        }
+    }
+
+    private void setStrategy(String name) throws Exception {
+        call(put("/config/strategy").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"strategy\":\"" + name + "\"}"), 200);
+    }
+
     private JsonNode call(RequestBuilder request, int expectedStatus) throws Exception {
         String body = mvc.perform(request).andExpect(status().is(expectedStatus))
                 .andReturn().getResponse().getContentAsString();

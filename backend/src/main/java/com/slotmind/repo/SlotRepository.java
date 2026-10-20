@@ -1,5 +1,6 @@
 package com.slotmind.repo;
 
+import com.slotmind.domain.NotFoundException;
 import com.slotmind.domain.Slot;
 import com.slotmind.domain.SlotStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,4 +12,9 @@ public interface SlotRepository extends JpaRepository<Slot, String> {
     List<Slot> findAllByOrderByStartTimeAsc();
 
     List<Slot> findByStatusAndStartTimeAfterOrderByStartTimeAsc(SlotStatus status, LocalDateTime after);
+
+    /** The slot, or {@link NotFoundException} (-> HTTP 404). */
+    default Slot require(String id) {
+        return findById(id).orElseThrow(() -> new NotFoundException("Slot", id));
+    }
 }

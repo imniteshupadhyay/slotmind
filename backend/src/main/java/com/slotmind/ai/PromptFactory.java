@@ -28,11 +28,20 @@ public class PromptFactory {
 
             Hard rules:
             - Choose slotId ONLY from the "Open slots" list. Never invent IDs.
+            - Specialty must match the original provider's specialty (marked "same specialty: yes").
+              A PEDIATRIC patient must stay with a pediatrician. Only pick another specialty if no
+              same-specialty slot exists, and then lower confidence below 0.5.
+            - Provider status meanings: AVAILABLE and BUSY providers can both be booked (BUSY just means
+              they are seeing patients right now). OFFLINE providers cannot. Never tell the patient a
+              doctor is "busy".
             - If the chosen slot's provider differs from the patient's original provider, set
               alternateProviderId to that slot's provider ID; otherwise set it to null.
-            - confidence is a number between 0 and 1 reflecting how well the slot fits.
+            - confidence (0-1) must be calibrated: ~0.9 same provider and close in time; ~0.75-0.85
+              same specialty, different provider; lower the further the slot is from the original time.
             - reasoning: 1-3 short, warm sentences addressed to the patient as "you". Staff will read it
               aloud over the phone. Mention the doctor's name and the day/time in plain words.
+              Be truthful about timing: each slot says whether it is earlier or later than the original
+              time; never call a later slot "earlier".
               No IDs, no internal jargon, no mention of "slots", "strategies" or "the system".
 
             Respond with ONLY a JSON object, no markdown, in exactly this shape:
@@ -122,8 +131,21 @@ public class PromptFactory {
     private static String slotLine(Slot s, SchedulingContext ctx) {
         Provider p = ctx.providerOf(s);
         long mins = Duration.between(ctx.now(), s.getStartTime()).toMinutes();
+        boolean sameProvider = p.getId().equals(ctx.originalProvider().getId());
+        boolean sameSpecialty = p.getSpecialty() == ctx.originalProvider().getSpecialty();
         return "- slotId=" + s.getId() + " | providerId=" + p.getId() + " (" + p.getName() + ", " + p.getSpecialty() + ")"
+                + " | same provider: " + (sameProvider ? "yes" : "no")
+                + " | same specialty: " + (sameSpecialty ? "yes" : "no")
                 + " | starts " + s.getStartTime().format(TS) + " (in " + mins + " min, " + Phrases.when(s.getStartTime(), ctx.now()) + ")"
+                + " | " + relativeToOriginal(s, ctx)
                 + " | " + s.getDurationMinutes() + " min";
+    }
+
+    private static String relativeToOriginal(Slot s, SchedulingContext ctx) {
+        if (ctx.originalSlot() == null) return "original time unknown";
+        long diff = Duration.between(ctx.originalSlot().getStartTime(), s.getStartTime()).toMinutes();
+        if (diff == 0) return "same time as original";
+        String amount = Math.abs(diff) >= 120 ? (Math.abs(diff) / 60) + " h" : Math.abs(diff) + " min";
+        return amount + (diff > 0 ? " LATER than original" : " EARLIER than original");
     }
 }

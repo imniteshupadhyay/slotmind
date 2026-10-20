@@ -93,6 +93,11 @@ public class SchedulingEngine {
             }
             Provider slotProvider = ctx.providerOf(slot);
             if (slotProvider == null || !slotProvider.isBookable()) continue;
+            if (slotProvider.getSpecialty() != ctx.originalProvider().getSpecialty() && sameSpecialtyAvailable(ctx)) {
+                log.warn("Discarding recommendation {}: specialty {} while a {} slot is open",
+                        slot.getId(), slotProvider.getSpecialty(), ctx.originalProvider().getSpecialty());
+                continue;
+            }
             // the alternate provider is, by definition, whoever owns the recommended slot
             String alternate = slot.getProviderId().equals(ctx.originalProvider().getId()) ? null : slot.getProviderId();
             double confidence = Math.max(0, Math.min(1, r.confidence()));
@@ -102,6 +107,12 @@ public class SchedulingEngine {
             return Optional.of(new Recommendation(slot.getId(), alternate, confidence, reasoning));
         }
         return Optional.empty();
+    }
+
+    private static boolean sameSpecialtyAvailable(SchedulingContext ctx) {
+        return ctx.candidateSlots().stream()
+                .map(ctx::providerOf)
+                .anyMatch(p -> p != null && p.getSpecialty() == ctx.originalProvider().getSpecialty());
     }
 
     private static String truncate(String s) {

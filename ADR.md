@@ -126,7 +126,7 @@ transactional listeners · a message broker.
 - **No LLM call inside a transaction:** read snapshot (short tx) → engine (no tx) → write suggestion
   (short tx). A slow model never blocks the single SQLite connection.
 - **Batch fairness:** the agent processes a batch sequentially on a single-thread executor. Each new
-  pending suggestion "soft-reserves" its slot, so the next patient in the batch gets a different slot
+  pending suggestion places a Hold on its slot, so the next patient in the batch gets a different slot
   (provider offline → two patients → two different openings).
 - **Failure:** AI failure → rule-based fallback (ADR-2). Any other exception is logged and shown in the
   agent activity feed, and the batch continues. Nothing is dropped silently.

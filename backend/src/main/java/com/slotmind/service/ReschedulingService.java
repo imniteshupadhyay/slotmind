@@ -68,7 +68,8 @@ public class ReschedulingService {
         SchedulingContext ctx = tx.execute(status -> buildContext(appointmentId, trigger));
         Optional<SchedulingEngine.Outcome> outcome = engine.recommend(ctx, progress);
         if (outcome.isEmpty()) {
-            activity.warn("No open slot found for " + ctx.appointment().getPatientName() + " (" + appointmentId + ")");
+            activity.warn("No " + ctx.originalProvider().getSpecialty() + " slot available for " + ctx.appointment().getPatientName()
+                    + " (" + appointmentId + "), needs a call from staff");
             return Optional.empty();
         }
 
@@ -98,7 +99,7 @@ public class ReschedulingService {
         Slot originalSlot = slots.findById(appt.getSlotId()).orElse(null);
         LocalDateTime now = LocalDateTime.now();
 
-        // Soft reservations: slots already offered to OTHER appointments, so a batch (provider offline)
+        // Holds: slots already offered to OTHER appointments, so a batch (provider offline)
         // doesn't propose the same slot to everyone. Also skip slots this patient already rejected.
         Set<String> heldByOthers = new HashSet<>();
         Set<String> rejectedByPatient = new HashSet<>();
@@ -115,7 +116,9 @@ public class ReschedulingService {
                 .filter(s -> !s.getId().equals(appt.getSlotId()))
                 .filter(s -> roster.containsKey(s.getProviderId()) && roster.get(s.getProviderId()).isBookable())
                 .filter(s -> !rejectedByPatient.contains(s.getId()))
+                .filter(s -> roster.get(s.getProviderId()).getSpecialty() == original.getSpecialty()) // never cross specialty
                 .toList();
+        // Relax the Holds only when no unheld slot of the right specialty is left: sharing beats giving up.
         List<Slot> unheld = open.stream().filter(s -> !heldByOthers.contains(s.getId())).toList();
         List<Slot> candidates = (unheld.isEmpty() ? open : unheld).stream().limit(MAX_CANDIDATES).toList();
 

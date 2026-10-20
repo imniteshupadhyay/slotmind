@@ -93,6 +93,20 @@ class SchedulingEngineTest {
     }
 
     @Test
+    void engineNeverCrossesSpecialtyEvenWhenNoMatchingSlotExists() {
+        SchedulingStrategy careless = new SchedulingStrategy() {
+            public String name() { return "ai"; }
+            public List<Recommendation> recommend(SchedulingContext c) {
+                return List.of(new Recommendation("S-SPEC", "PRV-002", 0.4, "specialist"));
+            }
+        };
+        SchedulingEngine engine = new SchedulingEngine(List.of(careless, new RuleBasedStrategy()), "ai");
+        Slot specialist = new Slot("S-SPEC", "PRV-002", now.plusHours(1), 30, SlotStatus.OPEN);
+
+        assertThat(engine.recommend(ctx(TriggerReason.PROVIDER_OFFLINE, specialist))).isEmpty();
+    }
+
+    @Test
     void engineDiscardsHallucinatedSlotsAndFixesAlternateProvider() {
         SchedulingStrategy sloppy = new SchedulingStrategy() {
             public String name() { return "ai"; }

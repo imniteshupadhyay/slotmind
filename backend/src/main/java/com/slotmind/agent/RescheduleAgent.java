@@ -66,7 +66,7 @@ public class RescheduleAgent {
     }
 
     /**
-     * Batch order matters because each suggestion soft-reserves its slot: URGENT, then FOLLOW_UP, then ROUTINE,
+     * Batch order matters because each suggestion places a Hold on its slot: URGENT, then FOLLOW_UP, then ROUTINE,
      * ties broken by the earliest original appointment time.
      */
     public List<String> triage(List<Appointment> affected) {
@@ -80,7 +80,7 @@ public class RescheduleAgent {
                 .toList();
     }
 
-    /** Sequential on purpose: each new suggestion soft-reserves its slot before the next appointment is planned. */
+    /** Sequential on purpose: each new suggestion Holds its slot before the next appointment is planned. */
     private void rescheduleAll(List<String> appointmentIds, TriggerReason trigger) {
         for (String id : appointmentIds) {
             try {

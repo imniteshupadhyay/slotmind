@@ -30,6 +30,8 @@ public class AppointmentController {
 
     public record StatusRequest(@NotNull AppointmentStatus status) {}
 
+    private static final String NO_SLOT = "No open slot with the right specialty is available for this appointment";
+
     private final BookingService booking;
     private final ReschedulingService rescheduling;
     private final Views views;
@@ -76,7 +78,7 @@ public class AppointmentController {
     @PostMapping("/{id}/suggest")
     public Views.SuggestionView suggest(@PathVariable String id) {
         var proposal = rescheduling.propose(id, TriggerReason.INITIAL)
-                .orElseThrow(() -> new DomainException("No open slot is available for this appointment"));
+                .orElseThrow(() -> new DomainException(NO_SLOT));
         return views.suggestion(proposal.suggestion().getId());
     }
 
@@ -91,7 +93,7 @@ public class AppointmentController {
             try {
                 var proposal = rescheduling.propose(id, TriggerReason.INITIAL, chunk -> send(emitter, "token", Map.of("text", chunk)));
                 if (proposal.isEmpty()) {
-                    send(emitter, "error", Map.of("message", "No open slot is available for this appointment"));
+                    send(emitter, "error", Map.of("message", NO_SLOT));
                 } else {
                     send(emitter, "suggestion", views.suggestion(proposal.get().suggestion().getId()));
                 }

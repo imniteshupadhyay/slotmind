@@ -28,9 +28,8 @@ public class PromptFactory {
 
             Hard rules:
             - Choose slotId ONLY from the "Open slots" list. Never invent IDs.
-            - Specialty must match the original provider's specialty (marked "same specialty: yes").
-              A PEDIATRIC patient must stay with a pediatrician. Only pick another specialty if no
-              same-specialty slot exists, and then lower confidence below 0.5.
+            - Every listed slot already matches the original provider's specialty; never suggest any
+              other specialty. A PEDIATRIC patient must stay with a pediatrician.
             - Provider status meanings: AVAILABLE and BUSY providers can both be booked (BUSY just means
               they are seeing patients right now). OFFLINE providers cannot. Never tell the patient a
               doctor is "busy".
@@ -98,7 +97,6 @@ public class PromptFactory {
         return switch (ctx.trigger()) {
             case PROVIDER_OFFLINE -> """
                     - The original provider is unavailable: pick a slot with a DIFFERENT provider.
-                    - Strongly prefer a provider with the SAME specialty as the original.
                     - URGENT: earliest suitable slot wins. ROUTINE/FOLLOW_UP: earliest same-specialty slot.""";
             case SLOT_CANCELLED -> """
                     - Strongly prefer the SAME provider's nearest open slot (continuity of care).
@@ -132,10 +130,8 @@ public class PromptFactory {
         Provider p = ctx.providerOf(s);
         long mins = Duration.between(ctx.now(), s.getStartTime()).toMinutes();
         boolean sameProvider = p.getId().equals(ctx.originalProvider().getId());
-        boolean sameSpecialty = p.getSpecialty() == ctx.originalProvider().getSpecialty();
         return "- slotId=" + s.getId() + " | providerId=" + p.getId() + " (" + p.getName() + ", " + p.getSpecialty() + ")"
                 + " | same provider: " + (sameProvider ? "yes" : "no")
-                + " | same specialty: " + (sameSpecialty ? "yes" : "no")
                 + " | starts " + s.getStartTime().format(TS) + " (in " + mins + " min, " + Phrases.when(s.getStartTime(), ctx.now()) + ")"
                 + " | " + relativeToOriginal(s, ctx)
                 + " | " + s.getDurationMinutes() + " min";

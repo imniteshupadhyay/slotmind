@@ -66,10 +66,9 @@ public class RescheduleAgent {
     @Async("agentExecutor")
     @TransactionalEventListener(fallbackExecution = true)
     public void on(AgentEvents.SuggestionsSuperseded event) {
-        for (AgentEvents.Superseded item : event.items()) {
-            activity.info("Suggestion for " + item.appointmentId() + " superseded (slot taken) - re-proposing");
-            rescheduleAll(List.of(item));
-        }
+        event.items().forEach(item ->
+                activity.info("Suggestion for " + item.appointmentId() + " superseded (slot taken) - re-proposing"));
+        rescheduleAll(triaged(event.items()));
     }
 
     /** A RESCHEDULE_PENDING booking still waiting on a valid pending suggestion needs nothing new. */
@@ -89,6 +88,17 @@ public class RescheduleAgent {
         Map<String, TriggerReason> triggers = new HashMap<>();
         direct.forEach(a -> triggers.put(a.getId(), disruption));
         invalidated.forEach(i -> triggers.putIfAbsent(i.appointmentId(), i.trigger()));
+        return triaged(triggers);
+    }
+
+    /** Re-proposals after an accept took their slot: same urgent-first order, each keeping its own trigger. */
+    private List<AgentEvents.Superseded> triaged(List<AgentEvents.Superseded> items) {
+        Map<String, TriggerReason> triggers = new HashMap<>();
+        items.forEach(i -> triggers.putIfAbsent(i.appointmentId(), i.trigger()));
+        return triaged(triggers);
+    }
+
+    private List<AgentEvents.Superseded> triaged(Map<String, TriggerReason> triggers) {
         return triage(appointments.findAllById(triggers.keySet())).stream()
                 .map(id -> new AgentEvents.Superseded(id, triggers.get(id)))
                 .toList();

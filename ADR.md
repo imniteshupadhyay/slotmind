@@ -124,7 +124,9 @@ transactional listeners · a message broker.
   change also rejects every pending suggestion whose slot it made unbookable, and those patients join the same
   triaged batch. Both feed `rescheduleAll(batch)` → `ReschedulingService.propose()`.
 - **Dedupe:** skip when a `PENDING` suggestion already exists for the same appointment + trigger
-  (checked before the engine runs and again inside the write transaction).
+  (checked before the engine runs and again inside the write transaction). Manual Suggest
+  (`ReschedulingService.suggestManually()`) is broader: it returns any `PENDING` suggestion for the
+  appointment, whatever its trigger, so staff never get a second one beside the agent's.
 - **No LLM call inside a transaction:** read snapshot (short tx) → engine (no tx) → write suggestion
   (short tx). A slow model never blocks the single SQLite connection.
 - **Batch fairness:** the agent processes a batch sequentially on a single-thread executor. Each new

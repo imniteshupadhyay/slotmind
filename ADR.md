@@ -120,7 +120,9 @@ transactional listeners · a message broker.
 - `RescheduleAgent` listens with `@TransactionalEventListener` (AFTER_COMMIT) + `@Async("agentExecutor")`,
   so the agent only runs if the status change actually committed, and the HTTP call returns 202 right away.
 - The listeners differ only in *how affected appointments are found*: by provider vs by slot, among
-  `CONFIRMED` and `RESCHEDULED` bookings. Both feed `rescheduleAll(ids, trigger)` → `ReschedulingService.propose()`.
+  `CONFIRMED`, `RESCHEDULED` and `RESCHEDULE_PENDING` bookings that have no pending suggestion left. The status
+  change also rejects every pending suggestion whose slot it made unbookable, and those patients join the same
+  triaged batch. Both feed `rescheduleAll(batch)` → `ReschedulingService.propose()`.
 - **Dedupe:** skip when a `PENDING` suggestion already exists for the same appointment + trigger
   (checked before the engine runs and again inside the write transaction).
 - **No LLM call inside a transaction:** read snapshot (short tx) → engine (no tx) → write suggestion

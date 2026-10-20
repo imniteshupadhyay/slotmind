@@ -11,7 +11,7 @@ Impl §6: "the batch is ordered URGENT → FOLLOW_UP → ROUTINE". Review findin
 - Re-proposals after a supersede run one at a time with no triage (`RescheduleAgent.java:62-65`).
 - Manual and SSE proposals (`AppointmentController.java:90`, on a separate `streamExecutor`) run alongside the agent thread, so they can take held slots out of priority order.
 
-Ticket 02 sends more traffic through the supersede path, which is why this ticket waits for it.
+Update after ticket 02: disruption-invalidated patients now join the disruption's *triaged* batch, not the supersede path. What's left untriaged is the accept → `SuggestionsSuperseded` path (`RescheduleAgent.on(SuggestionsSuperseded)`), plus the manual/SSE race.
 
 Decide:
 

@@ -20,6 +20,7 @@ Every in-scope finding from the 2026-10-20 two-axis code review (Standards + Spe
 <!-- one line per resolved ticket: [title](issues/NN-slug.md): gist -->
 
 - [What is the specialty rule when holds or scarcity leave no same-specialty slot?](issues/01-specialty-rule-under-holds.md): never cross specialty. Candidates are filtered to the original specialty up front, Holds relax within it, and staff are told when nothing matches. Implemented and tested.
+- [What happens to pending suggestions when their target provider goes offline or slot is cancelled?](issues/02-invalidate-pending-suggestions.md): rejected in the same transaction, and the patients join the disruption's urgent-first batch. They keep their original trigger unless their own booking was hit. RESCHEDULE_PENDING patients with nothing pending are included. Implemented and tested.
 
 ## Not yet specified
 

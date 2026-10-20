@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 /** All state-changing commands. Each public method is one transaction. */
 @Service
@@ -54,7 +55,9 @@ public class BookingService {
         Provider provider = provider(providerId);
         if (provider.changeStatus(status)) {
             activity.info(provider.getName() + " went OFFLINE - agent triggered");
-            events.publishEvent(new AgentEvents.ProviderWentOffline(providerId));
+            var invalidated = invalidatePending(s -> s.getProviderId().equals(providerId),
+                    a -> a.getProviderId().equals(providerId), TriggerReason.PROVIDER_OFFLINE);
+            events.publishEvent(new AgentEvents.ProviderWentOffline(providerId, invalidated));
         }
         return provider;
     }
@@ -68,9 +71,31 @@ public class BookingService {
         }
         if (slot.changeStatus(status)) {
             activity.info("Slot " + slotId + " CANCELLED - agent triggered");
-            events.publishEvent(new AgentEvents.SlotWasCancelled(slotId));
+            var invalidated = invalidatePending(s -> s.getId().equals(slotId),
+                    a -> a.getSlotId().equals(slotId), TriggerReason.SLOT_CANCELLED);
+            events.publishEvent(new AgentEvents.SlotWasCancelled(slotId, invalidated));
         }
         return slot;
+    }
+
+    /**
+     * Rejects pending suggestions whose slot a disruption just made unbookable, so no patient is left waiting
+     * on a dead option. The re-proposal keeps the suggestion's trigger unless the disruption also hit the
+     * patient's own booking: the prompt must describe the patient's real situation.
+     */
+    private List<AgentEvents.Superseded> invalidatePending(Predicate<Slot> hitSlot, Predicate<Appointment> hitOwnBooking,
+                                                           TriggerReason disruption) {
+        List<AgentEvents.Superseded> invalidated = new ArrayList<>();
+        for (RescheduleSuggestion pending : suggestions.findByStatus(SuggestionStatus.PENDING)) {
+            if (!hitSlot.test(slot(pending.getRecommendedSlotId()))) continue;
+            pending.reject();
+            Appointment appt = appointments.findById(pending.getAppointmentId())
+                    .orElseThrow(() -> new NotFoundException("Appointment", pending.getAppointmentId()));
+            TriggerReason trigger = hitOwnBooking.test(appt) ? disruption : pending.getTriggerReason();
+            invalidated.add(new AgentEvents.Superseded(appt.getId(), trigger));
+            activity.info("Suggestion for " + appt.getPatientName() + " superseded (" + disruption + ") - re-proposing");
+        }
+        return invalidated;
     }
 
     @Transactional

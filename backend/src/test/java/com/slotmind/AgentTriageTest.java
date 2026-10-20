@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.EnumSet;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,7 +41,7 @@ class AgentTriageTest {
                 EnumSet.of(AppointmentStatus.CONFIRMED, AppointmentStatus.RESCHEDULED));
         assertThat(agent.triage(affected)).containsExactly(maria, "APT-002", "APT-001"); // urgent, follow-up, routine
 
-        agent.on(new AgentEvents.ProviderWentOffline("PRV-001")); // @Async proxy: completes on the agent thread
+        agent.on(new AgentEvents.ProviderWentOffline("PRV-001", List.of())); // @Async proxy: completes on the agent thread
         long deadline = System.currentTimeMillis() + 15_000;
         while (suggestions.findByStatus(SuggestionStatus.PENDING).size() < 3 && System.currentTimeMillis() < deadline) {
             Thread.sleep(100);

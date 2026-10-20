@@ -8,11 +8,14 @@ import java.util.List;
 public final class AgentEvents {
     private AgentEvents() {}
 
-    /** A provider went OFFLINE: every active booking with them is affected. */
-    public record ProviderWentOffline(String providerId) {}
+    /**
+     * A provider went OFFLINE: every booking with them is affected, plus the patients whose pending
+     * suggestion pointed at one of their slots ({@code invalidated}, already rejected).
+     */
+    public record ProviderWentOffline(String providerId, List<Superseded> invalidated) {}
 
-    /** A slot was CANCELLED: the (at most one) booking on it is affected. */
-    public record SlotWasCancelled(String slotId) {}
+    /** A slot was CANCELLED: the (at most one) booking on it, plus patients whose pending suggestion pointed at it. */
+    public record SlotWasCancelled(String slotId, List<Superseded> invalidated) {}
 
     /** Pending suggestions became stale because their slot was taken; re-propose for these appointments. */
     public record SuggestionsSuperseded(List<Superseded> items) {}

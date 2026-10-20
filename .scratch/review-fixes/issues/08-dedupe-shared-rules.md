@@ -8,7 +8,7 @@ Blocked by: 01
 
 Nothing here needs deciding: these are the review's smells that hide real drift risk. It waits for 01 because 01 changes the specialty check.
 
-- **The "active booking" rule.** It is written three times: `RescheduleAgent.java:27` (`EnumSet.of(CONFIRMED, RESCHEDULED)`), `AppointmentStatus.isActiveBooking()` (which nothing calls) and `components.jsx:161`. Use `isActiveBooking()` on the backend. If the frontend still needs the rule, expose it as a field on the view.
+- **The "active booking" rule.** It still lives in `AppointmentStatus.isActiveBooking()` (which nothing calls) and `components.jsx:161`. After ticket 02, the agent no longer uses it: it uses `BOOKED` (which also includes RESCHEDULE_PENDING) plus `needingPlan()`. Decide whether `isActiveBooking()` is dead code to delete, or the rule the UI should get from the view.
 - **The candidate limit.** `ReschedulingService.java:33` uses 25 and `PromptFactory.java:22` uses 20. Keep the two limits if the difference is intended (Impl §4 says "capped at 25 (the AI prompt shows the first 20)"), but name both and define them next to each other.
 - **The appointment lookup.** `appointments.findById(..).orElseThrow(NotFoundException)` is repeated at `BookingService.java:90,132` and `ReschedulingService.java:91,129`. Extract one helper.
 - **The same-specialty check.** After ticket 01, this check lives in three places:

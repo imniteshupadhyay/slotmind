@@ -1,7 +1,7 @@
 # Should manual Suggest reuse a pending suggestion from any trigger?
 
 Type: grilling
-Status: claimed
+Status: resolved
 Blocked by: none
 
 ## Question
@@ -19,3 +19,11 @@ Recommendation: yes.
 ## Decision
 
 2026-10-20: the user accepted the recommendation above as written (via /implement-spec). Implement it.
+
+## Answer
+
+Implemented in `b84b2a8` (merged in `aba910d`) and extended in the review fixes (`4258f31`).
+
+- **Manual dedupe.** `ReschedulingService.suggestManually` reuses any PENDING suggestion for the appointment, whatever its trigger, checking both before the engine runs and inside the write tx. Both `/suggest` endpoints use it.
+- **Agent dedupe.** The agent reuses a pending suggestion with the same trigger. A new suggestion with a different trigger supersedes (rejects) the older one, so there's **at most one PENDING suggestion per appointment** and the UI's "newest only" view can't hide a live one.
+- **Tests.** `ManualSuggestDedupeTest`.

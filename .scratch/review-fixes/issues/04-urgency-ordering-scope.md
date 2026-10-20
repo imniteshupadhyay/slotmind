@@ -1,7 +1,7 @@
 # Which proposal paths must respect urgent-first ordering?
 
 Type: grilling
-Status: claimed
+Status: resolved
 Blocked by: 02
 
 ## Question
@@ -23,3 +23,12 @@ Recommendation: sort re-proposal batches, and let human-initiated proposals race
 ## Decision
 
 2026-10-20: the user accepted the recommendation above as written (via /implement-spec). Implement it.
+
+## Answer
+
+Implemented in `64c0182` (merged in `bb9c892`).
+
+- **Triaged re-proposals.** `RescheduleAgent.on(SuggestionsSuperseded)` re-plans the superseded patients as one batch through `triage()` (URGENT → FOLLOW_UP → ROUTINE, ties by original time), each keeping its own trigger.
+- **Test.** `SupersedeTriageTest`: one accept supersedes routine John, urgent Maria and follow-up Emily. Maria gets the freed earlier slot. The test was red first.
+- **Manual/SSE proposals still race the agent.** ADR-4 and Impl §6 document why that's safe: Holds are soft and accept is atomic.
+- **Review fixes (`4258f31`).** All batches now go through one `triaged(List<PlanRequest>)`.

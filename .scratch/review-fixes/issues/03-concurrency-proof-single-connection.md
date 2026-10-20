@@ -1,7 +1,7 @@
 # How do we make the no-double-booking guarantee honest under a single SQLite connection?
 
 Type: grilling
-Status: claimed
+Status: resolved
 Blocked by: none
 
 ## Question
@@ -23,3 +23,12 @@ Recommendation: all three.
 ## Decision
 
 2026-10-20: the user accepted the recommendation above as written (via /implement-spec). Implement it.
+
+## Answer
+
+Implemented in `ce92bc2` (merged in `1d383c3`) and tightened in the review fixes (`4258f31`).
+
+- **Provider versioning.** `Provider` has `@Version` (`bigint default 0`). `accept()` loads the provider via `ProviderRepository.requireForBooking` with `LockModeType.OPTIMISTIC_FORCE_INCREMENT`, so a provider status change that commits concurrently with an accept is also caught.
+- **Version-check tests.** `AcceptConcurrencyTest` adds `staleSlotWriteIsRejectedByItsVersion`, `acceptFailsWhenItsProviderRowIsStaleAtCommit` and `providerStatusChangeReadBeforeAnAcceptCommitsIsRejected`. With pool size 1 they prove that the version check fires on a stale row. They do not prove a true cross-transaction race, and ADR-3 says exactly that.
+- **409 handling.** The handler catches `OptimisticLockingFailureException`, with the message "…this booking or its provider…".
+- **Docs.** ADR-3 now says: the single writer serialises accepts, `Slot.book()` rejects the loser, and `@Version` is the backstop. Demo and Impl docs updated to match.

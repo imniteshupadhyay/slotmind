@@ -1,7 +1,7 @@
 # Give each duplicated rule one home
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: 01
 
 ## Question
@@ -20,3 +20,13 @@ Nothing here needs deciding: these are the review's smells that hide real drift 
 - **The fallback label.** `SchedulingEngine.java:81` builds `"rule (fallback: …)"` as text, and `components.jsx:63` parses it back with `startsWith`. Expose a `fallback` boolean (plus a reason) on the suggestion view, and have the UI read that instead.
 
 No behaviour change. Done when `mvn -q test` passes and the demo's fallback badge still shows. (AFK)
+
+## Answer
+
+Implemented in `d93ad34` (merged in `8692116`), with naming and placement tightened in the review fixes (`4258f31`).
+
+- **Fallback label.** The suggestion view exposes `fallback` and `fallbackReason`. `engine/StrategyLabel` is the only code that writes or parses the label text. The UI badge reads `s.fallback`.
+- **Same specialty.** `Provider.sameSpecialtyAs` is the one check, used by the context filter, the engine guard and the rule strategy.
+- **Candidate limits.** `SchedulingContext.MAX_CANDIDATES = 25` and `MAX_PROMPT_CANDIDATES = 20`, defined side by side.
+- **Lookups.** `require()` on the appointment, provider, slot and suggestion repositories replaces the repeated `findById(...).orElseThrow`.
+- **Active booking.** `isActiveBooking()` was deleted. Its replacement on the domain is `AppointmentStatus.OCCUPYING_SLOT` / `occupiesSlot()`, used by the agent, `Views` and `buildContext`. The `components.jsx` button check stays a UI concern.

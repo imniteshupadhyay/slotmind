@@ -10,6 +10,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:sqlite:target/test-slotmind.db?busy_timeout=10000",
@@ -31,6 +34,7 @@ class AcceptConcurrencyTest {
     @Autowired SlotRepository slots;
     @Autowired SuggestionRepository suggestions;
     @Autowired TransactionTemplate tx;
+    @Autowired JdbcTemplate jdbc;
 
     @BeforeEach
     void reset() {
@@ -57,7 +61,8 @@ class AcceptConcurrencyTest {
                 booking.accept(id);
                 wins.incrementAndGet();
             } catch (RuntimeException expected) {
-                // loser: slot already booked / suggestion superseded / version conflict
+                // loser: the single connection runs the accepts in turn, so the state checks (slot booked,
+                // suggestion superseded) stop it; @Version is proven separately below
             }
             return null;
         })).<Future<?>>map(f -> f).toList();
@@ -86,5 +91,36 @@ class AcceptConcurrencyTest {
         assertThat(a.getProviderId()).isEqualTo("PRV-004");
         assertThat(slots.findById("SLT-001").orElseThrow().getStatus()).isEqualTo(SlotStatus.OPEN);
         assertThat(slots.findById("SLT-005").orElseThrow().getStatus()).isEqualTo(SlotStatus.BOOKED);
+    }
+
+    /*
+     * The pool has one connection, so two transactions can never interleave. A JDBC write on that same
+     * connection plays the other staff member: it changes the row and bumps its version after we loaded it,
+     * which is what a second connection would do if the pool ever grew.
+     */
+
+    @Test
+    void staleSlotWriteIsRejectedByItsVersion() {
+        assertThatThrownBy(() -> tx.executeWithoutResult(s -> {
+            Slot slot = slots.findById("SLT-005").orElseThrow();
+            jdbc.update("update slots set status = 'BOOKED', version = version + 1 where id = ?", "SLT-005");
+            slot.book(); // our stale copy still says OPEN, so only the version check can stop this write
+        })).isInstanceOf(OptimisticLockingFailureException.class);
+    }
+
+    @Test
+    void acceptFailsWhenItsProviderGoesOfflineBeforeCommit() {
+        tx.executeWithoutResult(s -> {
+            appointments.findById("APT-001").orElseThrow().markReschedulePending();
+            suggestions.save(new RescheduleSuggestion("SUG-D", "APT-001", "SLT-005", "PRV-004", 0.8, "d", TriggerReason.PROVIDER_OFFLINE, "rule"));
+        });
+
+        assertThatThrownBy(() -> tx.executeWithoutResult(s -> {
+            booking.accept("SUG-D"); // passes the isBookable() check: PRV-004 is still available here
+            jdbc.update("update providers set status = 'OFFLINE', version = version + 1 where id = ?", "PRV-004");
+        })).isInstanceOf(OptimisticLockingFailureException.class);
+
+        assertThat(appointments.findById("APT-001").orElseThrow().getSlotId()).isEqualTo("SLT-001");
+        assertThat(slots.findById("SLT-005").orElseThrow().getStatus()).isEqualTo(SlotStatus.OPEN);
     }
 }
